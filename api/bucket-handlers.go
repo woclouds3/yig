@@ -452,7 +452,9 @@ func (api ObjectAPIHandlers) GetBucketLifeCycleHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	setXmlHeader(w, lcBuffer)
+	setXmlHeader(w)
+	//ResponseRecorder
+	w.(*ResponseRecorder).operationName = "GetBucketLifeCycle"
 	WriteSuccessResponse(w, lcBuffer)
 
 }
@@ -556,7 +558,9 @@ func (api ObjectAPIHandlers) GetBucketAclHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	setXmlHeader(w, aclBuffer)
+	setXmlHeader(w)
+	//ResponseRecorder
+	w.(*ResponseRecorder).operationName = "GetBucketAcl"
 	WriteSuccessResponse(w, aclBuffer)
 }
 
@@ -647,7 +651,9 @@ func (api ObjectAPIHandlers) GetBucketCorsHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	setXmlHeader(w, corsBuffer)
+	setXmlHeader(w)
+	//ResponseRecorder
+	w.(*ResponseRecorder).operationName = "GetBucketCors"
 	WriteSuccessResponse(w, corsBuffer)
 }
 
@@ -675,7 +681,9 @@ func (api ObjectAPIHandlers) GetBucketVersioningHandler(w http.ResponseWriter, r
 		return
 	}
 
-	setXmlHeader(w, versioningBuffer)
+	setXmlHeader(w)
+	//ResponseRecorder
+	w.(*ResponseRecorder).operationName = "GetBucketVersioning"
 	WriteSuccessResponse(w, versioningBuffer)
 }
 

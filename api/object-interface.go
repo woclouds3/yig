@@ -56,6 +56,11 @@ type ObjectLayer interface {
 	GetBucketPolicy(ctx context.Context, credential common.Credential, bucket string) (policy.Policy, error)
 	DeleteBucketPolicy(ctx context.Context, credential common.Credential, bucket string) error
 
+	// Website operations
+	SetBucketWebsite(credential common.Credential, bucket string, config datatype.WebsiteConfiguration) error
+	GetBucketWebsite(credential common.Credential, bucket string) (datatype.WebsiteConfiguration, error)
+	DeleteBucketWebsite(credential common.Credential, bucket string) error
+
 	// Object operations.
 	GetObject(ctx context.Context, object *meta.Object, startOffset int64, length int64, writer io.Writer,
 		sse datatype.SseRequest) (err error)

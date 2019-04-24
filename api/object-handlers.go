@@ -1051,7 +1051,10 @@ func (api ObjectAPIHandlers) GetObjectAclHandler(w http.ResponseWriter, r *http.
 		w.Header().Set("x-amz-version-id", version)
 	}
 
-	setXmlHeader(w, aclBuffer)
+	setXmlHeader(w)
+
+	//ResponseRecorder
+	w.(*ResponseRecorder).operationName = "GetObjectAcl"
 	WriteSuccessResponse(w, aclBuffer)
 }
 
@@ -1587,7 +1590,10 @@ func (api ObjectAPIHandlers) CompleteMultipartUploadHandler(w http.ResponseWrite
 			result.SseCustomerKeyMd5Base64)
 	}
 
-	setXmlHeader(w, encodedSuccessResponse)
+	setXmlHeader(w)
+
+	//ResponseRecorder
+	w.(*ResponseRecorder).operationName = "CompleteMultipartUpload"
 	// write success response.
 	WriteSuccessResponse(w, encodedSuccessResponse)
 }
