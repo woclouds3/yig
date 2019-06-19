@@ -12,19 +12,23 @@ import (
 	"time"
 )
 
-func (t *TidbClient) GetBucket(bucketName string) (bucket Bucket, err error) {
+func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
 	var acl, cors, lc, policy, createTime string
-	sqltext := "select * from buckets where bucketname=?;"
+	var updateTime sql.NullString
+	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,file_counts,update_time from buckets where bucketname=?;"
+	tmp := &Bucket{}
 	err = t.Client.QueryRow(sqltext, bucketName).Scan(
-		&bucket.Name,
+		&tmp.Name,
 		&acl,
 		&cors,
 		&lc,
-		&bucket.OwnerId,
+		&tmp.OwnerId,
 		&policy,
 		&createTime,
-		&bucket.Usage,
-		&bucket.Versioning,
+		&tmp.Usage,
+		&tmp.Versioning,
+		&tmp.FileCounts,
+		&updateTime,
 	)
 	if err != nil && err == sql.ErrNoRows {
 		err = ErrNoSuchBucket
@@ -32,31 +36,38 @@ func (t *TidbClient) GetBucket(bucketName string) (bucket Bucket, err error) {
 	} else if err != nil {
 		return
 	}
-	bucket.CreateTime, err = time.Parse(TIME_LAYOUT_TIDB, createTime)
+	tmp.CreateTime, err = time.Parse(TIME_LAYOUT_TIDB, createTime)
 	if err != nil {
 		return
 	}
-	err = json.Unmarshal([]byte(acl), &bucket.ACL)
+	err = json.Unmarshal([]byte(acl), &tmp.ACL)
 	if err != nil {
 		return
 	}
-	err = json.Unmarshal([]byte(cors), &bucket.CORS)
+	err = json.Unmarshal([]byte(cors), &tmp.CORS)
 	if err != nil {
 		return
 	}
-	err = json.Unmarshal([]byte(lc), &bucket.LC)
+	err = json.Unmarshal([]byte(lc), &tmp.LC)
 	if err != nil {
 		return
 	}
-	err = json.Unmarshal([]byte(policy), &bucket.Policy)
+	err = json.Unmarshal([]byte(policy), &tmp.Policy)
 	if err != nil {
 		return
 	}
+	if updateTime.Valid {
+		tmp.UpdateTime, err = time.Parse(TIME_LAYOUT_TIDB, updateTime.String)
+		if err != nil {
+			return
+		}
+	}
+	bucket = tmp
 	return
 }
 
-func (t *TidbClient) GetBuckets() (buckets []Bucket, err error) {
-	sqltext := "select * from buckets;"
+func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
+	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,file_counts,update_time from buckets;"
 	rows, err := t.Client.Query(sqltext)
 	if err == sql.ErrNoRows {
 		err = nil
@@ -69,6 +80,7 @@ func (t *TidbClient) GetBuckets() (buckets []Bucket, err error) {
 	for rows.Next() {
 		var tmp Bucket
 		var acl, cors, lc, policy, createTime string
+		var updateTime sql.NullString
 		err = rows.Scan(
 			&tmp.Name,
 			&acl,
@@ -78,7 +90,9 @@ func (t *TidbClient) GetBuckets() (buckets []Bucket, err error) {
 			&policy,
 			&createTime,
 			&tmp.Usage,
-			&tmp.Versioning)
+			&tmp.Versioning,
+			&tmp.FileCounts,
+			&updateTime)
 		if err != nil {
 			return
 		}
@@ -102,13 +116,19 @@ func (t *TidbClient) GetBuckets() (buckets []Bucket, err error) {
 		if err != nil {
 			return
 		}
-		buckets = append(buckets, tmp)
+		if updateTime.Valid {
+			tmp.UpdateTime, err = time.Parse(TIME_LAYOUT_TIDB, updateTime.String)
+			if err != nil {
+				return
+			}
+		}
+		buckets = append(buckets, &tmp)
 	}
 	return
 }
 
 //Actually this method is used to update bucket
-func (t *TidbClient) PutBucket(bucket Bucket) error {
+func (t *TidbClient) PutBucket(bucket *Bucket) error {
 	sql, args := bucket.GetUpdateSql()
 	_, err := t.Client.Exec(sql, args...)
 	if err != nil {
@@ -117,7 +137,7 @@ func (t *TidbClient) PutBucket(bucket Bucket) error {
 	return nil
 }
 
-func (t *TidbClient) CheckAndPutBucket(bucket Bucket) (bool, error) {
+func (t *TidbClient) CheckAndPutBucket(bucket *Bucket) (bool, error) {
 	var processed bool
 	_, err := t.GetBucket(bucket.Name)
 	if err == nil {
@@ -254,7 +274,7 @@ func (t *TidbClient) ListObjects(bucketName, marker, verIdMarker, prefix, delimi
 	return
 }
 
-func (t *TidbClient) DeleteBucket(bucket Bucket) error {
+func (t *TidbClient) DeleteBucket(bucket *Bucket) error {
 	sqltext := "delete from buckets where bucketname=?;"
 	_, err := t.Client.Exec(sqltext, bucket.Name)
 	if err != nil {
@@ -279,7 +299,39 @@ func (t *TidbClient) UpdateUsage(bucketName string, size int64, tx interface{}) 
 	}
 	sqlTx, _ = tx.(*sql.Tx)
 
-	sql := "update buckets set usages= usages + ? where bucketname=?;"
+	sql := "update buckets set usages=? where bucketname=?;"
 	_, err = sqlTx.Exec(sql, size, bucketName)
 	return
+}
+
+func (t *TidbClient) UpdateUsages(usages map[string]int64, tx interface{}) error {
+	var sqlTx *sql.Tx
+	var err error
+	if nil == tx {
+		tx, err = t.Client.Begin()
+		defer func() {
+			if nil == err {
+				err = sqlTx.Commit()
+			} else {
+				sqlTx.Rollback()
+			}
+		}()
+	}
+	sqlTx, _ = tx.(*sql.Tx)
+	sqlStr := "update buckets set usages = ? where bucketname = ?;"
+	st, err := sqlTx.Prepare(sqlStr)
+	if err != nil {
+		helper.Logger.Println(2, "failed to prepare statment with sql: ", sqlStr, ", err: ", err)
+		return err
+	}
+	defer st.Close()
+
+	for bucket, usage := range usages {
+		_, err = st.Exec(usage, bucket)
+		if err != nil {
+			helper.Logger.Println(2, "failed to update usage for bucket: ", bucket, " with usage: ", usage, ", err: ", err)
+			return err
+		}
+	}
+	return nil
 }

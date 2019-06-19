@@ -240,3 +240,8 @@ CREATE TABLE `lifecycle` (
                        `bucketname` varchar(255) DEFAULT NULL,
                        `status` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+
+ALTER TABLE buckets
+ADD COLUMN file_counts bigint(20) DEFAULT 0;
+ALTER TABLE buckets
+ADD COLUMN update_time datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;

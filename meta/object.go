@@ -7,8 +7,12 @@ import (
 	"github.com/journeymidnight/yig/redis"
 )
 
+const (
+	OBJECT_CACHE_PREFIX = "object:"
+)
+
 func (m *Meta) GetObject(bucketName string, objectName string, willNeed bool) (object *Object, err error) {
-	getObject := func() (o interface{}, err error) {
+	getObject := func() (o helper.Serializable, err error) {
 		helper.Logger.Println(10, "GetObject CacheMiss. bucket:", bucketName, "object:", objectName)
 		object, err := m.Client.GetObject(bucketName, objectName, "")
 		if err != nil {
@@ -21,14 +25,14 @@ func (m *Meta) GetObject(bucketName string, objectName string, willNeed bool) (o
 		}
 		return object, nil
 	}
-	unmarshaller := func(in []byte) (interface{}, error) {
-		var object Object
-		err := helper.MsgPackUnMarshal(in, &object)
-		return &object, err
+
+	toObject := func(fields map[string]string) (interface{}, error) {
+		o := &Object{}
+		return o.Deserialize(fields)
 	}
 
-	o, err := m.Cache.Get(redis.ObjectTable, bucketName+":"+objectName+":",
-		getObject, unmarshaller, willNeed)
+	o, err := m.Cache.Get(redis.ObjectTable, OBJECT_CACHE_PREFIX, bucketName+":"+objectName+":",
+		getObject, toObject, willNeed)
 	if err != nil {
 		return
 	}
@@ -50,7 +54,7 @@ func (m *Meta) GetObjectMap(bucketName, objectName string) (objMap *ObjMap, err 
 }
 
 func (m *Meta) GetObjectVersion(bucketName, objectName, version string, willNeed bool) (object *Object, err error) {
-	getObjectVersion := func() (o interface{}, err error) {
+	getObjectVersion := func() (o helper.Serializable, err error) {
 		object, err := m.Client.GetObject(bucketName, objectName, version)
 		if err != nil {
 			return
@@ -61,13 +65,14 @@ func (m *Meta) GetObjectVersion(bucketName, objectName, version string, willNeed
 		}
 		return object, nil
 	}
-	unmarshaller := func(in []byte) (interface{}, error) {
-		var object Object
-		err := helper.MsgPackUnMarshal(in, &object)
-		return &object, err
+
+	toObject := func(fields map[string]string) (interface{}, error) {
+		o := &Object{}
+		return o.Deserialize(fields)
 	}
-	o, err := m.Cache.Get(redis.ObjectTable, bucketName+":"+objectName+":"+version,
-		getObjectVersion, unmarshaller, willNeed)
+
+	o, err := m.Cache.Get(redis.ObjectTable, OBJECT_CACHE_PREFIX, bucketName+":"+objectName+":"+version,
+		getObjectVersion, toObject, willNeed)
 	if err != nil {
 		return
 	}
@@ -107,7 +112,7 @@ func (m *Meta) PutObject(object *Object, multipart *Multipart, objMap *ObjMap, u
 	}
 
 	if updateUsage {
-		err = m.Client.UpdateUsage(object.BucketName, object.Size, tx)
+		err = m.UpdateUsage(object.BucketName, object.Size)
 		if err != nil {
 			return err
 		}
@@ -165,7 +170,7 @@ func (m *Meta) DeleteObject(object *Object, DeleteMarker bool, objMap *ObjMap) e
 		return err
 	}
 
-	err = m.Client.UpdateUsage(object.BucketName, -object.Size, tx)
+	err = m.UpdateUsage(object.BucketName, -object.Size)
 	if err != nil {
 		return err
 	}

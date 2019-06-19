@@ -6,19 +6,19 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"io"
+	"path"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/journeymidnight/yig/api/datatype"
+	"github.com/journeymidnight/yig/circuitbreak"
 	"github.com/journeymidnight/yig/crypto"
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/log"
 	"github.com/journeymidnight/yig/meta"
 	"github.com/journeymidnight/yig/redis"
-	"path"
-	"time"
-	"github.com/journeymidnight/yig/circuitbreak"
 )
 
 const (
@@ -76,6 +76,7 @@ func New(logger *log.Logger, metaCacheType int, enableDataCache bool, CephConfig
 	}
 
 	initializeRecycler(&yig)
+	initializeMetaSyncWorker(&yig)
 	return &yig
 }
 
@@ -84,6 +85,8 @@ func (y *YigStorage) Stop() {
 	helper.Logger.Print(5, "Stopping storage...")
 	y.WaitGroup.Wait()
 	helper.Logger.Println(5, "done")
+	helper.Logger.Print(5, "Stopping MetaStorage...")
+	y.MetaStorage.Stop()
 }
 
 // check cache health per one second if enable cache
@@ -99,9 +102,8 @@ func (y *YigStorage) PingCache(interval time.Duration) {
 					if err != nil {
 						return err
 					}
-					defer c.Close()
 					// Use table.String() + key as Redis key
-					_, err = c.Do("PING")
+					_, err = c.Ping()
 					helper.ErrorIf(err, "Cmd: %s.", "PING")
 					return err
 				},

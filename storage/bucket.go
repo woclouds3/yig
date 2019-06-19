@@ -11,7 +11,8 @@ import (
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/iam"
 	"github.com/journeymidnight/yig/iam/common"
-	meta "github.com/journeymidnight/yig/meta/types"
+	"github.com/journeymidnight/yig/meta"
+	"github.com/journeymidnight/yig/meta/types"
 	"github.com/journeymidnight/yig/meta/util"
 	"github.com/journeymidnight/yig/redis"
 	"strings"
@@ -25,7 +26,7 @@ func (yig *YigStorage) MakeBucket(bucketName string, acl datatype.Acl,
 	}
 
 	now := time.Now().UTC()
-	bucket := meta.Bucket{
+	bucket := &types.Bucket{
 		Name:       bucketName,
 		CreateTime: now,
 		OwnerId:    credential.UserId,
@@ -60,7 +61,7 @@ func (yig *YigStorage) MakeBucket(bucketName string, acl datatype.Acl,
 		}
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.UserTable, credential.UserId)
+		yig.MetaStorage.Cache.Remove(redis.UserTable, meta.BUCKET_CACHE_PREFIX, credential.UserId)
 	}
 	return err
 }
@@ -89,7 +90,7 @@ func (yig *YigStorage) SetBucketAcl(bucketName string, policy datatype.AccessCon
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 	return nil
 }
@@ -110,7 +111,7 @@ func (yig *YigStorage) SetBucketLc(bucketName string, lc datatype.Lc,
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 
 	err = yig.MetaStorage.PutBucketToLifeCycle(bucket)
@@ -152,7 +153,7 @@ func (yig *YigStorage) DelBucketLc(bucketName string, credential common.Credenti
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 	err = yig.MetaStorage.RemoveBucketFromLifeCycle(bucket)
 	if err != nil {
@@ -178,7 +179,7 @@ func (yig *YigStorage) SetBucketCors(bucketName string, cors datatype.Cors,
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 	return nil
 }
@@ -197,7 +198,7 @@ func (yig *YigStorage) DeleteBucketCors(bucketName string, credential common.Cre
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 	return nil
 }
@@ -236,7 +237,7 @@ func (yig *YigStorage) SetBucketVersioning(bucketName string, versioning datatyp
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 	return nil
 }
@@ -275,12 +276,12 @@ func (yig *YigStorage) GetBucketAcl(bucketName string, credential common.Credent
 }
 
 // For INTERNAL USE ONLY
-func (yig *YigStorage) GetBucket(bucketName string) (meta.Bucket, error) {
+func (yig *YigStorage) GetBucket(bucketName string) (*types.Bucket, error) {
 	return yig.MetaStorage.GetBucket(bucketName, true)
 }
 
 func (yig *YigStorage) GetBucketInfo(bucketName string,
-	credential common.Credential) (bucket meta.Bucket, err error) {
+	credential common.Credential) (bucket *types.Bucket, err error) {
 
 	bucket, err = yig.MetaStorage.GetBucket(bucketName, true)
 	if err != nil {
@@ -323,7 +324,7 @@ func (yig *YigStorage) SetBucketPolicy(credential common.Credential, bucketName 
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 	return nil
 }
@@ -365,12 +366,12 @@ func (yig *YigStorage) DeleteBucketPolicy(credential common.Credential, bucketNa
 		return err
 	}
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 	return nil
 }
 
-func (yig *YigStorage) ListBuckets(credential common.Credential) (buckets []meta.Bucket, err error) {
+func (yig *YigStorage) ListBuckets(credential common.Credential) (buckets []*types.Bucket, err error) {
 	bucketNames, err := yig.MetaStorage.GetUserBuckets(credential.UserId, true)
 	if err != nil {
 		return
@@ -417,8 +418,8 @@ func (yig *YigStorage) DeleteBucket(bucketName string, credential common.Credent
 	}
 
 	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.UserTable, credential.UserId)
-		yig.MetaStorage.Cache.Remove(redis.BucketTable, bucketName)
+		yig.MetaStorage.Cache.Remove(redis.UserTable, meta.USER_CACHE_PREFIX, credential.UserId)
+		yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
 	}
 
 	if bucket.LC.Rule != nil {
@@ -432,7 +433,7 @@ func (yig *YigStorage) DeleteBucket(bucketName string, credential common.Credent
 }
 
 func (yig *YigStorage) ListObjectsInternal(bucketName string,
-	request datatype.ListObjectsRequest) (retObjects []*meta.Object, prefixes []string, truncated bool,
+	request datatype.ListObjectsRequest) (retObjects []*types.Object, prefixes []string, truncated bool,
 	nextMarker, nextVerIdMarker string, err error) {
 
 	var marker string
@@ -460,7 +461,7 @@ func (yig *YigStorage) ListObjectsInternal(bucketName string,
 }
 
 func (yig *YigStorage) ListObjects(credential common.Credential, bucketName string,
-	request datatype.ListObjectsRequest) (result meta.ListObjectsInfo, err error) {
+	request datatype.ListObjectsRequest) (result types.ListObjectsInfo, err error) {
 
 	bucket, err := yig.MetaStorage.GetBucket(bucketName, true)
 	helper.Debugln("GetBucket", bucket)
@@ -495,7 +496,7 @@ func (yig *YigStorage) ListObjects(credential common.Credential, bucketName stri
 	for _, obj := range retObjects {
 		helper.Debugln("result:", obj.Name)
 		object := datatype.Object{
-			LastModified: obj.LastModifiedTime.UTC().Format(meta.CREATE_TIME_LAYOUT),
+			LastModified: obj.LastModifiedTime.UTC().Format(types.CREATE_TIME_LAYOUT),
 			ETag:         "\"" + obj.Etag + "\"",
 			Size:         obj.Size,
 			StorageClass: "STANDARD",
@@ -535,7 +536,7 @@ func (yig *YigStorage) ListObjects(credential common.Credential, bucketName stri
 // TODO: refactor, similar to ListObjects
 // or not?
 func (yig *YigStorage) ListVersionedObjects(credential common.Credential, bucketName string,
-	request datatype.ListObjectsRequest) (result meta.VersionedListObjectsInfo, err error) {
+	request datatype.ListObjectsRequest) (result types.VersionedListObjectsInfo, err error) {
 
 	bucket, err := yig.MetaStorage.GetBucket(bucketName, true)
 	if err != nil {
@@ -567,7 +568,7 @@ func (yig *YigStorage) ListVersionedObjects(credential common.Credential, bucket
 	for _, o := range retObjects {
 		// TODO: IsLatest
 		object := datatype.VersionedObject{
-			LastModified: o.LastModifiedTime.UTC().Format(meta.CREATE_TIME_LAYOUT),
+			LastModified: o.LastModifiedTime.UTC().Format(types.CREATE_TIME_LAYOUT),
 			ETag:         "\"" + o.Etag + "\"",
 			Size:         o.Size,
 			StorageClass: "STANDARD",

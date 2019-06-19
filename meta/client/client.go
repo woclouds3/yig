@@ -15,18 +15,19 @@ type Client interface {
 	GetObject(bucketName, objectName, version string) (object *Object, err error)
 	GetAllObject(bucketName, objectName, version string) (object []*Object, err error)
 	PutObject(object *Object, tx interface{}) error
-	UpdateAppendObject (object *Object) error
+	UpdateAppendObject(object *Object) error
 	UpdateObjectAttrs(object *Object) error
 	DeleteObject(object *Object, tx interface{}) error
 	UpdateObjectAcl(object *Object) error
 	//bucket
-	GetBucket(bucketName string) (bucket Bucket, err error)
-	GetBuckets() (buckets []Bucket, err error)
-	PutBucket(bucket Bucket) error
-	CheckAndPutBucket(bucket Bucket) (bool, error)
-	DeleteBucket(bucket Bucket) error
+	GetBucket(bucketName string) (bucket *Bucket, err error)
+	GetBuckets() (buckets []*Bucket, err error)
+	PutBucket(bucket *Bucket) error
+	CheckAndPutBucket(bucket *Bucket) (bool, error)
+	DeleteBucket(bucket *Bucket) error
 	ListObjects(bucketName, marker, verIdMarker, prefix, delimiter string, versioned bool, maxKeys int) (retObjects []*Object, prefixes []string, truncated bool, nextMarker, nextVerIdMarker string, err error)
 	UpdateUsage(bucketName string, size int64, tx interface{}) error
+	UpdateUsages(usages map[string]int64, tx interface{}) error
 
 	//multipart
 	GetMultipart(bucketName, objectName, uploadId string) (multipart Multipart, err error)
@@ -42,7 +43,7 @@ type Client interface {
 	GetCluster(fsid, pool string) (cluster Cluster, err error)
 	//lc
 	PutBucketToLifeCycle(lifeCycle LifeCycle) error
-	RemoveBucketFromLifeCycle(bucket Bucket) error
+	RemoveBucketFromLifeCycle(bucket *Bucket) error
 	ScanLifeCycle(limit int, marker string) (result ScanLifeCycleResult, err error)
 	//user
 	GetUserBuckets(userId string) (buckets []string, err error)

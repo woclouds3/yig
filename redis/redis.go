@@ -1,22 +1,16 @@
 package redis
 
 import (
-	"encoding/hex"
-	"github.com/minio/highwayhash"
-	"io"
-	"strconv"
-	"strings"
-
 	"context"
-	redigo "github.com/gomodule/redigo/redis"
+	"strconv"
+
+	"github.com/cep21/circuit"
 	"github.com/journeymidnight/yig/circuitbreak"
 	"github.com/journeymidnight/yig/helper"
-	"time"
-	"github.com/cep21/circuit"
 )
 
 var (
-	redisPool *redigo.Pool
+	redisClient  *RedisCli
 	CacheCircuit *circuit.Circuit
 )
 
@@ -35,62 +29,44 @@ func (r RedisDatabase) InvalidQueue() string {
 }
 
 const (
-	UserTable    RedisDatabase = iota
-	BucketTable  
-	ObjectTable  
-	FileTable    
-	ClusterTable 
+	UserTable RedisDatabase = iota
+	BucketTable
+	ObjectTable
+	FileTable
+	ClusterTable
 )
 
 var MetadataTables = []RedisDatabase{UserTable, BucketTable, ObjectTable, ClusterTable}
 var DataTables = []RedisDatabase{FileTable}
 
 func Initialize() {
-
-	options := []redigo.DialOption{
-		redigo.DialReadTimeout(time.Duration(helper.CONFIG.RedisReadTimeout) * time.Second),
-		redigo.DialConnectTimeout(time.Duration(helper.CONFIG.RedisConnectTimeout) * time.Second),
-		redigo.DialWriteTimeout(time.Duration(helper.CONFIG.RedisWriteTimeout) * time.Second),
-		redigo.DialKeepAlive(time.Duration(helper.CONFIG.RedisKeepAlive) * time.Second),
-	}
-
-	if helper.CONFIG.RedisPassword != "" {
-		options = append(options, redigo.DialPassword(helper.CONFIG.RedisPassword))
-	}
-
-	df := func() (redigo.Conn, error) {
-		c, err := redigo.Dial("tcp", helper.CONFIG.RedisAddress, options...)
-		if err != nil {
-			return nil, err
-		}
-		return c, nil
-	}
-
+	redisClient = NewRedisCli()
+	redisClient.Init()
 	CacheCircuit = circuitbreak.NewCacheCircuit()
-	redisPool = &redigo.Pool{
-			MaxIdle:     helper.CONFIG.RedisPoolMaxIdle,
-			IdleTimeout: time.Duration(helper.CONFIG.RedisPoolIdleTimeout) * time.Second,
-			// Other pool configuration not shown in this example.
-			Dial: df,
-	}
-}
-
-func Pool() *redigo.Pool {
-	return redisPool
 }
 
 func Close() {
-	err := redisPool.Close()
-	if err != nil {
-		helper.ErrorIf(err, "Cannot close redis pool.")
+	if redisClient != nil && redisClient.IsValid() {
+		err := redisClient.Close()
+		if err != nil {
+			helper.ErrorIf(err, "Cannot close redis pool.")
+		}
 	}
 }
 
-func GetClient(ctx context.Context) (redigo.Conn, error) {
-	return redisPool.GetContext(ctx)
+func GetClient(ctx context.Context) (*RedisCli, error) {
+	return redisClient, nil
 }
 
-func Remove(table RedisDatabase, key string) (err error) {
+func HasRedisClient() bool {
+	if redisClient != nil && redisClient.IsValid() {
+		return true
+	}
+
+	return false
+}
+
+func Remove(table RedisDatabase, prefix, key string) (err error) {
 	return CacheCircuit.Execute(
 		context.Background(),
 		func(ctx context.Context) (err error) {
@@ -98,14 +74,10 @@ func Remove(table RedisDatabase, key string) (err error) {
 			if err != nil {
 				return err
 			}
-			defer c.Close()
-			hashkey,err := HashSum(key)
-			if err != nil {
-				return err
-			}
+
 			// Use table.String() + hashkey as Redis key
-			_, err = c.Do("DEL", table.String()+hashkey)
-			if err == redigo.ErrNil {
+			_, err = c.Del(table.String() + prefix + helper.EscapeColon(key))
+			if err == nil {
 				return nil
 			}
 			helper.ErrorIf(err, "Cmd: %s. Key: %s.", "DEL", table.String()+key)
@@ -115,7 +87,7 @@ func Remove(table RedisDatabase, key string) (err error) {
 	)
 }
 
-func Set(table RedisDatabase, key string, value interface{}) (err error) {
+func Set(table RedisDatabase, prefix, key string, value interface{}) (err error) {
 	return CacheCircuit.Execute(
 		context.Background(),
 		func(ctx context.Context) (err error) {
@@ -123,18 +95,14 @@ func Set(table RedisDatabase, key string, value interface{}) (err error) {
 			if err != nil {
 				return err
 			}
-			defer c.Close()
 			encodedValue, err := helper.MsgPackMarshal(value)
 			if err != nil {
 				return err
 			}
-			hashkey,err := HashSum(key)
-			if err != nil {
-				return err
-			}
+
 			// Use table.String() + hashkey as Redis key. Set expire time to 30s.
-			r, err := redigo.String(c.Do("SET", table.String()+hashkey, string(encodedValue), "EX", 30))
-			if err == redigo.ErrNil {
+			r, err := c.Set(table.String()+prefix+helper.EscapeColon(key), encodedValue, 30000)
+			if err == nil {
 				return nil
 			}
 			helper.ErrorIf(err, "Cmd: %s. Key: %s. Value: %s. Reply: %s.", "SET", table.String()+key, string(encodedValue), r)
@@ -145,8 +113,7 @@ func Set(table RedisDatabase, key string, value interface{}) (err error) {
 
 }
 
-func Get(table RedisDatabase, key string,
-	unmarshal func([]byte) (interface{}, error)) (value interface{}, err error) {
+func Get(table RedisDatabase, prefix, key string) (value interface{}, err error) {
 	var encodedValue []byte
 	err = CacheCircuit.Execute(
 		context.Background(),
@@ -155,16 +122,10 @@ func Get(table RedisDatabase, key string,
 			if err != nil {
 				return err
 			}
-			hashkey,err := HashSum(key)
-			if err != nil {
-				return err
-			}
+
 			// Use table.String() + hashkey as Redis key
-			encodedValue, err = redigo.Bytes(c.Do("GET", table.String()+hashkey))
+			encodedValue, err = c.Get(table.String() + prefix + helper.EscapeColon(key))
 			if err != nil {
-				if err == redigo.ErrNil {
-					return nil
-				}
 				return err
 			}
 			return nil
@@ -177,7 +138,124 @@ func Get(table RedisDatabase, key string,
 	if len(encodedValue) == 0 {
 		return nil, nil
 	}
-	return unmarshal(encodedValue)
+	err = helper.MsgPackUnMarshal(encodedValue, value)
+	return value, err
+}
+
+// don't use the escapecolon in keys command.
+func Keys(table RedisDatabase, pattern string) ([]string, error) {
+	var keys []string
+	query := table.String() + pattern
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			keys, err = c.Keys(query)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+		nil,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return keys, nil
+
+}
+
+func MGet(table RedisDatabase, prefix string, keys []string) ([]interface{}, error) {
+	var results []interface{}
+	var queryKeys []string
+	for _, key := range keys {
+		queryKeys = append(queryKeys, table.String()+prefix+helper.EscapeColon(key))
+	}
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			results, err = c.MGet(queryKeys)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+		nil,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func MSet(table RedisDatabase, prefix string, pairs map[string]interface{}) (string, error) {
+	var result string
+	tmpPairs := make(map[interface{}]interface{})
+	for k, v := range pairs {
+		tmpPairs[table.String()+prefix+helper.EscapeColon(k)] = v
+	}
+
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			result, err = c.MSet(tmpPairs)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+		nil,
+	)
+
+	if err != nil {
+		return "", err
+	}
+
+	return result, nil
+
+}
+
+func IncrBy(table RedisDatabase, prefix, key string, value int64) (int64, error) {
+	var result int64
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			result, err = c.IncrBy(prefix+helper.EscapeColon(key), value)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+		nil,
+	)
+	if err != nil {
+		helper.Logger.Println(2, "failed to call IncrBy with key: ", key, ", value: ", value)
+		return 0, err
+	}
+	return result, err
 }
 
 // Get file bytes
@@ -192,16 +270,10 @@ func GetBytes(key string, start int64, end int64) ([]byte, error) {
 			if err != nil {
 				return err
 			}
-			hashkey,err := HashSum(key)
-			if err != nil {
-				return err
-			}
+
 			// Use table.String() + hashkey as Redis key
-			value, err = redigo.Bytes(c.Do("GETRANGE", FileTable.String()+hashkey, start, end))
+			value, err = c.GetRange(FileTable.String()+helper.EscapeColon(key), start, end)
 			if err != nil {
-				if err == redigo.ErrNil {
-					return nil
-				}
 				return err
 			}
 			return nil
@@ -223,13 +295,10 @@ func SetBytes(key string, value []byte) (err error) {
 			if err != nil {
 				return err
 			}
-			hashkey,err := HashSum(key)
-			if err != nil {
-				return err
-			}
+
 			// Use table.String() + hashkey as Redis key
-			r, err := redigo.String(c.Do("SET", FileTable.String()+hashkey, value))
-			if err == redigo.ErrNil {
+			r, err := c.Set(FileTable.String()+helper.EscapeColon(key), value, 0)
+			if err == nil {
 				return nil
 			}
 			helper.ErrorIf(err, "Cmd: %s. Key: %s. Value: %s. Reply: %s.", "SET", FileTable.String()+key, string(value), r)
@@ -237,6 +306,189 @@ func SetBytes(key string, value []byte) (err error) {
 		},
 		nil,
 	)
+}
+
+func HSet(table RedisDatabase, prefix, key, field string, value interface{}) (bool, error) {
+	var r bool
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			r, err = c.HSet(table.String()+prefix+helper.EscapeColon(key), field, value)
+			if err == nil {
+				return nil
+			}
+			helper.ErrorIf(err, "Cmd: %s, key: %s, field: %s, value %v", "HSet", table.String()+helper.EscapeColon(key), field, value)
+			return err
+		},
+		nil,
+	)
+
+	if err != nil {
+		return false, err
+	}
+	return r, nil
+}
+
+func HGet(table RedisDatabase, prefix, key, field string) (string, error) {
+	var r string
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			r, err = c.HGet(table.String()+prefix+helper.EscapeColon(key), field)
+			if err == nil {
+				return nil
+			}
+			helper.ErrorIf(err, "Cmd: %s, key: %s, field: %s", "HGet", table.String()+helper.EscapeColon(key), field)
+			return err
+		},
+		nil,
+	)
+
+	if err != nil {
+		return "", err
+	}
+	return r, nil
+}
+
+func HGetInt64(table RedisDatabase, prefix, key, field string) (int64, error) {
+	var r int64
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			theKey := table.String() + prefix + helper.EscapeColon(key)
+			r, err = c.HGetInt64(theKey, field)
+			if err == nil {
+				return nil
+			}
+			helper.ErrorIf(err, "Cmd: %s, key: %s, field: %s", "HGetInt64", theKey, field)
+			return err
+		},
+		nil,
+	)
+
+	if err != nil {
+		return 0, err
+	}
+	return r, nil
+}
+
+func HGetAll(table RedisDatabase, prefix, key string) (map[string]string, error) {
+	var r map[string]string
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			r, err = c.HGetAll(table.String() + prefix + helper.EscapeColon(key))
+			if err == nil {
+				return nil
+			}
+			helper.ErrorIf(err, "Cmd: %s, key: %s", "HGetAll", table.String()+helper.EscapeColon(key))
+			return err
+		},
+		nil,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func HIncrBy(table RedisDatabase, prefix, key, field string, incr int64) (int64, error) {
+	var r int64
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			r, err = c.HIncrBy(table.String()+prefix+helper.EscapeColon(key), field, incr)
+			if err == nil {
+				return nil
+			}
+			helper.ErrorIf(err, "Cmd: %s, key: %s, field: %s, incr: %d", "HIncrBy", table.String()+helper.EscapeColon(key), field, incr)
+			return err
+		},
+		nil,
+	)
+
+	if err != nil {
+		return 0, err
+	}
+	return r, nil
+}
+
+func HMSet(table RedisDatabase, prefix, key string, fields map[string]interface{}) (string, error) {
+	var r string
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			r, err = c.HMSet(table.String()+prefix+helper.EscapeColon(key), fields)
+			if err == nil {
+				return nil
+			}
+			helper.ErrorIf(err, "Cmd: %s, key: %s, field: %v", "HMSet", table.String()+helper.EscapeColon(key), fields)
+			return err
+		},
+		nil,
+	)
+
+	if err != nil {
+		return "", err
+	}
+	return r, nil
+}
+
+func HMGet(table RedisDatabase, prefix, key string, fields []string) (map[string]interface{}, error) {
+	var r map[string]interface{}
+	err := CacheCircuit.Execute(
+		context.Background(),
+		func(ctx context.Context) (err error) {
+			c, err := GetClient(ctx)
+			if err != nil {
+				return err
+			}
+
+			r, err = c.HMGet(table.String()+prefix+helper.EscapeColon(key), fields)
+			if err == nil {
+				return nil
+			}
+			helper.ErrorIf(err, "Cmd: %s, key: %s, field: %v", "HMGet", table.String()+helper.EscapeColon(key), fields)
+			return err
+		},
+		nil,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 // Publish the invalid message to other YIG instances through Redis
@@ -248,42 +500,16 @@ func Invalid(table RedisDatabase, key string) (err error) {
 			if err != nil {
 				return err
 			}
-			hashkey,err := HashSum(key)
-			if err != nil {
-				return err
-			}
+
 			// Use table.String() + hashkey as Redis key
-			r, err := redigo.String(c.Do("PUBLISH", table.InvalidQueue(), hashkey))
-			if err == redigo.ErrNil {
+			r, err := c.Publish(table.InvalidQueue(), helper.EscapeColon(key))
+			if err == nil {
 				return nil
 			}
-			helper.ErrorIf(err, "Cmd: %s. Queue: %s. Key: %s. Reply: %s.", "PUBLISH", table.InvalidQueue(), FileTable.String()+key, r)
+			helper.ErrorIf(err, "Cmd: %s. Queue: %s. Key: %s. Reply: %d.", "PUBLISH", table.InvalidQueue(), FileTable.String()+key, r)
 			return err
 		},
 		nil,
 	)
 
-}
-
-// Get Object to HighWayHash for redis
-func HashSum(ObjectName string) (string,error) {
-	key, err := hex.DecodeString(keyvalue)
-	if err != nil {
-		return "",err
-	}
-
-	ObjectNameString := strings.NewReader(ObjectName)
-
-	hash, err := highwayhash.New(key)
-	if err != nil {
-		return "",err
-	}
-
-	if _, err = io.Copy(hash, ObjectNameString); err != nil {
-		return "",err
-	}
-
-	sumresult := hex.EncodeToString(hash.Sum(nil))
-
-	return sumresult,nil
 }

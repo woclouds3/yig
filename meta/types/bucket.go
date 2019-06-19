@@ -4,11 +4,21 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
+	"time"
+
 	"github.com/dustin/go-humanize"
 	"github.com/journeymidnight/yig/api/datatype"
 	"github.com/journeymidnight/yig/api/datatype/policy"
-	"time"
+	"github.com/journeymidnight/yig/helper"
+)
+
+const (
+	FIELD_NAME_BODY       = "body"
+	FIELD_NAME_USAGE      = "usage"
+	FIELD_NAME_FILECOUNTS = "file_counts"
 )
 
 type Bucket struct {
@@ -23,6 +33,47 @@ type Bucket struct {
 	Policy     policy.Policy
 	Versioning string // actually enum: Disabled/Enabled/Suspended
 	Usage      int64
+	FileCounts int64
+	UpdateTime time.Time
+}
+
+// implements the Serializable interface
+func (b *Bucket) Serialize() (map[string]interface{}, error) {
+	fields := make(map[string]interface{})
+	bytes, err := helper.MsgPackMarshal(b)
+	if err != nil {
+		return nil, err
+	}
+	fields[FIELD_NAME_BODY] = string(bytes)
+	fields[FIELD_NAME_USAGE] = b.Usage
+	fields[FIELD_NAME_FILECOUNTS] = b.FileCounts
+	return fields, nil
+}
+
+func (b *Bucket) Deserialize(fields map[string]string) (interface{}, error) {
+	body, ok := fields[FIELD_NAME_BODY]
+	if !ok {
+		return nil, errors.New(fmt.Sprintf("no field %s found", FIELD_NAME_BODY))
+	}
+
+	err := helper.MsgPackUnMarshal([]byte(body), b)
+	if err != nil {
+		return nil, err
+	}
+	if usageStr, ok := fields[FIELD_NAME_USAGE]; ok {
+		b.Usage, err = strconv.ParseInt(usageStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if fileCountStr, ok := fields[FIELD_NAME_FILECOUNTS]; ok {
+		b.FileCounts, err = strconv.ParseInt(fileCountStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
 }
 
 func (b *Bucket) String() (s string) {
@@ -35,6 +86,8 @@ func (b *Bucket) String() (s string) {
 	s += "Policy: " + fmt.Sprintf("%+v", b.Policy) + "\n"
 	s += "Version: " + b.Versioning + "\n"
 	s += "Usage: " + humanize.Bytes(uint64(b.Usage)) + "\n"
+	s += "FileCounts: " + humanize.Bytes(uint64(b.FileCounts)) + "\n"
+	s += "UpdateTime: " + b.UpdateTime.Format(CREATE_TIME_LAYOUT) + "\n"
 	return
 }
 
@@ -54,6 +107,11 @@ func (b *Bucket) GetValues() (values map[string]map[string][]byte, err error) {
 	if err != nil {
 		return
 	}
+	var fileCounts bytes.Buffer
+	err = binary.Write(&fileCounts, binary.BigEndian, b.FileCounts)
+	if err != nil {
+		return
+	}
 	values = map[string]map[string][]byte{
 		BUCKET_COLUMN_FAMILY: map[string][]byte{
 			"UID":        []byte(b.OwnerId),
@@ -63,6 +121,8 @@ func (b *Bucket) GetValues() (values map[string]map[string][]byte, err error) {
 			"createTime": []byte(b.CreateTime.Format(CREATE_TIME_LAYOUT)),
 			"versioning": []byte(b.Versioning),
 			"usage":      usage.Bytes(),
+			"FileCounts": fileCounts.Bytes(),
+			"UpdateTime": []byte(b.UpdateTime.Format(CREATE_TIME_LAYOUT)),
 		},
 		// TODO fancy ACL
 	}
@@ -75,8 +135,8 @@ func (b Bucket) GetUpdateSql() (string, []interface{}) {
 	cors, _ := json.Marshal(b.CORS)
 	lc, _ := json.Marshal(b.LC)
 	bucket_policy, _ := json.Marshal(b.Policy)
-	sql := "update buckets set bucketname=?,acl=?,policy=?,cors=?,lc=?,uid=?,versioning=? where bucketname=?"
-	args := []interface{}{b.Name, acl, bucket_policy, cors, lc, b.OwnerId, b.Versioning, b.Name}
+	sql := "update buckets set bucketname=?,acl=?,policy=?,cors=?,lc=?,uid=?,versioning=?,file_counts=? where bucketname=?"
+	args := []interface{}{b.Name, acl, bucket_policy, cors, lc, b.OwnerId, b.Versioning, b.FileCounts, b.Name}
 	return sql, args
 }
 
@@ -87,8 +147,8 @@ func (b Bucket) GetCreateSql() (string, []interface{}) {
 	bucket_policy, _ := json.Marshal(b.Policy)
 	createTime := b.CreateTime.Format(TIME_LAYOUT_TIDB)
 
-	sql := "insert into buckets(bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning) " +
-		"values(?,?,?,?,?,?,?,?,?);"
-	args := []interface{}{b.Name, acl, cors, lc, b.OwnerId, bucket_policy, createTime, b.Usage, b.Versioning}
+	sql := "insert into buckets(bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,file_counts) " +
+		"values(?,?,?,?,?,?,?,?,?,?);"
+	args := []interface{}{b.Name, acl, cors, lc, b.OwnerId, bucket_policy, createTime, b.Usage, b.Versioning, b.FileCounts}
 	return sql, args
 }
