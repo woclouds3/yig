@@ -1,19 +1,31 @@
-package v1
+package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
-	"github.com/journeymidnight/yig/iam/common"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/journeymidnight/yig/circuitbreak"
 	"github.com/journeymidnight/yig/helper"
-	"time"
-	"bytes"
-	"errors"
-	"context"
-	"net/http"
-	"io/ioutil"
-	"fmt"
-	"strings"
+	"github.com/journeymidnight/yig/iam/common"
+	"github.com/journeymidnight/yig/mods"
 )
+
+const pluginName = "wocloud_iam"
+
+//The variable MUST be named as Exported.
+//the code in yig-plugin will lookup this symbol
+var Exported = mods.YigPlugin{
+	Name:       pluginName,
+	PluginType: mods.IAM_PLUGIN,
+	Create:     GetWocloudIamClient,
+}
 
 type AccessKeyItem struct {
 	ProjectId    string `json:"projectId"`
@@ -46,13 +58,13 @@ type QueryRespAll struct {
 }
 
 type Client struct {
-	httpClient *circuitbreak.CircuitClient
+	httpClient  *circuitbreak.CircuitClient
+	iamEndpoint string
+	iamKey      string
+	iamSecret   string
 }
 
-func (a Client) GetKeysByUid (uid string) (credentials []common.Credential, err error) {
-	if a.httpClient == nil {
-		a.httpClient = circuitbreak.NewCircuitClient()
-	}
+func (a *Client) GetKeysByUid(uid string) (credentials []common.Credential, err error) {
 	var slog = helper.Logger
 	var query Query
 	var offset int = 0
@@ -66,7 +78,7 @@ func (a Client) GetKeysByUid (uid string) (credentials []common.Credential, err 
 			slog.Println(5, "json err:", err)
 			return credentials, err
 		}
-		request, _ := http.NewRequest("POST", helper.CONFIG.IamEndpoint, strings.NewReader(string(b)))
+		request, _ := http.NewRequest("POST", a.iamEndpoint, strings.NewReader(string(b)))
 		request.Header.Set("X-Le-Key", "key")
 		request.Header.Set("X-Le-Secret", "secret")
 		slog.Println(10, "replay request:", request, string(b))
@@ -115,10 +127,7 @@ func (a Client) GetKeysByUid (uid string) (credentials []common.Credential, err 
 	return
 }
 
-func (a Client) GetCredential (accessKey string) (credential common.Credential, err error) {
-	if a.httpClient == nil {
-		a.httpClient = circuitbreak.NewCircuitClient()
-	}
+func (a *Client) GetCredential(accessKey string) (credential common.Credential, err error) {
 	var slog = helper.Logger
 	var query Query
 	query.Action = "DescribeAccessKeys"
@@ -141,13 +150,13 @@ func (a Client) GetCredential (accessKey string) (credential common.Credential, 
 		}
 	}()
 
-	request, err := http.NewRequest("POST", helper.CONFIG.IamEndpoint, bytes.NewReader(b))
+	request, err := http.NewRequest("POST", a.iamEndpoint, bytes.NewReader(b))
 	if err != nil {
 		return credential, err
 	}
 
-	request.Header.Set("X-Le-Key", helper.CONFIG.IamKey)
-	request.Header.Set("X-Le-Secret", helper.CONFIG.IamSecret)
+	request.Header.Set("X-Le-Key", a.iamKey)
+	request.Header.Set("X-Le-Secret", a.iamSecret)
 	request.Header.Set("content-type", "application/json")
 	request = request.WithContext(ctx)
 	response, err := a.httpClient.Do(request)
@@ -163,7 +172,7 @@ func (a Client) GetCredential (accessKey string) (credential common.Credential, 
 	if err != nil {
 		return credential, err
 	}
-	slog.Println(10, "iam:", helper.CONFIG.IamEndpoint)
+	slog.Println(10, "iam:", a.iamEndpoint)
 	slog.Println(10, "request:", string(b))
 	slog.Println(10, "response:", string(body))
 
@@ -186,4 +195,18 @@ func (a Client) GetCredential (accessKey string) (credential common.Credential, 
 		return credential, common.ErrAccessKeyNotExist
 	}
 	return credential, nil
+}
+
+func GetWocloudIamClient(config map[string]interface{}) (interface{}, error) {
+
+	helper.Logger.Printf(10, "Get plugin config: %v\n", config)
+
+	c := Client{
+		httpClient:  circuitbreak.NewCircuitClient(),
+		iamEndpoint: config["iam_endpoint"].(string),
+		iamKey:      config["iam_key"].(string),
+		iamSecret:   config["iam_secret"].(string),
+	}
+
+	return interface{}(c), nil
 }
