@@ -78,9 +78,9 @@ func RequestIdFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	
+
 	if result, ok := ctx.Value(RequestContextKey).(RequestContext); ok {
-		return result.RequestId
+		return result.RequestID
 	}
 	return ""
 }
