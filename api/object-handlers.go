@@ -95,7 +95,6 @@ func (api ObjectAPIHandlers) errAllowableObjectNotFound(w http.ResponseWriter, r
 		WriteErrorResponse(w, r, ErrNoSuchBucket)
 		return
 	}
-
 	var err error
 	if ctx.BucketInfo.Policy.IsAllowed(policy.Args{
 		Action:          policy.ListBucketAction,
@@ -140,7 +139,7 @@ func (api ObjectAPIHandlers) errAllowableObjectNotFound(w http.ResponseWriter, r
 			}
 		}
 	}
-	if api.ReturnWebsiteErrorDocument(w, r) {
+	if api.ReturnWebsiteErrorDocument(w, r, status) {
 		return
 	}
 	WriteErrorResponse(w, r, err)

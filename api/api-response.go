@@ -268,7 +268,7 @@ func WriteErrorResponseHeaders(w http.ResponseWriter, r *http.Request, err error
 	}
 	website := ctx.BucketInfo.Website
 	// match routing rules
-	if website.RoutingRules != nil || len(website.RoutingRules) != 0 {
+	if len(website.RoutingRules) != 0 {
 		for _, rule := range website.RoutingRules {
 			// If the condition matches, handle redirect
 			if rule.Match(ctx.ObjectName, strconv.Itoa(status)) {
@@ -277,6 +277,7 @@ func WriteErrorResponseHeaders(w http.ResponseWriter, r *http.Request, err error
 			}
 		}
 	}
+
 	w.WriteHeader(status)
 	return false
 }
