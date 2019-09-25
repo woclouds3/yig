@@ -96,7 +96,6 @@ func Test_CopyObjectPart(t *testing.T) {
 		Bucket:     aws.String(TEST_BUCKET),
 		CopySource: aws.String(TEST_BUCKET + "/" + TEST_KEY),
 		Key:        aws.String(TEST_COPY_KEY),
-
 	}
 	_, err = svc.Client.CopyObject(input)
 	if err != nil {
