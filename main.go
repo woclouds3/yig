@@ -1,16 +1,21 @@
 package main
 
 import (
-	"github.com/journeymidnight/yig/helper"
-	"github.com/journeymidnight/yig/log"
-	"github.com/journeymidnight/yig/redis"
-	"github.com/journeymidnight/yig/storage"
 	"math/rand"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
+
+	"github.com/journeymidnight/yig/helper"
+	"github.com/journeymidnight/yig/iam"
+	"github.com/journeymidnight/yig/log"
+	bus "github.com/journeymidnight/yig/messagebus"
+	_ "github.com/journeymidnight/yig/messagebus/kafka"
+	"github.com/journeymidnight/yig/mods"
+	"github.com/journeymidnight/yig/redis"
+	"github.com/journeymidnight/yig/storage"
 )
 
 var logger *log.Logger
@@ -28,6 +33,7 @@ func main() {
 
 	helper.SetupConfig()
 
+	//yig log
 	f, err := os.OpenFile(helper.CONFIG.LogPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		panic("Failed to open log file " + helper.CONFIG.LogPath)
@@ -36,11 +42,19 @@ func main() {
 
 	logger = log.New(f, "[yig]", log.LstdFlags, helper.CONFIG.LogLevel)
 	helper.Logger = logger
-
+	logger.Printf(20, "YIG conf: %+v \n", helper.CONFIG)
 	logger.Println(5, "YIG instance ID:", helper.CONFIG.InstanceId)
 
+	//access log
+	a, err := os.OpenFile(helper.CONFIG.AccessLogPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		panic("Failed to open access log file " + helper.CONFIG.AccessLogPath)
+	}
+	defer a.Close()
+	accessLogger := log.New(a, "", 0, helper.CONFIG.LogLevel)
+	helper.AccessLogger = accessLogger
+
 	if helper.CONFIG.MetaCacheType > 0 || helper.CONFIG.EnableDataCache {
-		defer redis.Close()
 		redis.Initialize()
 	}
 
@@ -50,6 +64,27 @@ func main() {
 		Logger:  logger,
 		Yig:     yig,
 	}
+
+	// try to create message bus sender if message bus is enabled.
+	// message bus sender is singleton so create it beforehand.
+	if helper.CONFIG.MsgBus.Enabled {
+		messageBusSender, err := bus.GetMessageSender()
+		if err != nil {
+			helper.Logger.Printf(2, "failed to create message bus sender, err: %v", err)
+			panic("failed to create message bus sender")
+		}
+		if nil == messageBusSender {
+			helper.Logger.Printf(2, "failed to create message bus sender, sender is nil.")
+			panic("failed to create message bus sender, sender is nil.")
+		}
+		helper.Logger.Printf(20, "succeed to create message bus sender.")
+	}
+
+	//Read all *.so from plugins directory, and fill the varaible allPlugins
+	allPluginMap := mods.InitialPlugins()
+
+	iam.InitializeIamClient(allPluginMap)
+
 	startAdminServer(adminServerConfig)
 
 	apiServerConfig := &ServerConfig{

@@ -4,11 +4,20 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
+	"time"
+
 	"github.com/dustin/go-humanize"
 	"github.com/journeymidnight/yig/api/datatype"
 	"github.com/journeymidnight/yig/api/datatype/policy"
-	"time"
+	"github.com/journeymidnight/yig/helper"
+)
+
+const (
+	FIELD_NAME_BODY  = "body"
+	FIELD_NAME_USAGE = "usage"
 )
 
 type Bucket struct {
@@ -23,6 +32,39 @@ type Bucket struct {
 	Policy     policy.Policy
 	Versioning string // actually enum: Disabled/Enabled/Suspended
 	Usage      int64
+	UpdateTime time.Time
+}
+
+// implements the Serializable interface
+func (b *Bucket) Serialize() (map[string]interface{}, error) {
+	fields := make(map[string]interface{})
+	bytes, err := helper.MsgPackMarshal(b)
+	if err != nil {
+		return nil, err
+	}
+	fields[FIELD_NAME_BODY] = string(bytes)
+	fields[FIELD_NAME_USAGE] = b.Usage
+	return fields, nil
+}
+
+func (b *Bucket) Deserialize(fields map[string]string) (interface{}, error) {
+	body, ok := fields[FIELD_NAME_BODY]
+	if !ok {
+		return nil, errors.New(fmt.Sprintf("no field %s found", FIELD_NAME_BODY))
+	}
+
+	err := helper.MsgPackUnMarshal([]byte(body), b)
+	if err != nil {
+		return nil, err
+	}
+	if usageStr, ok := fields[FIELD_NAME_USAGE]; ok {
+		b.Usage, err = strconv.ParseInt(usageStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return b, nil
 }
 
 func (b *Bucket) String() (s string) {
@@ -35,6 +77,7 @@ func (b *Bucket) String() (s string) {
 	s += "Policy: " + fmt.Sprintf("%+v", b.Policy) + "\n"
 	s += "Version: " + b.Versioning + "\n"
 	s += "Usage: " + humanize.Bytes(uint64(b.Usage)) + "\n"
+	s += "UpdateTime: " + b.UpdateTime.Format(CREATE_TIME_LAYOUT) + "\n"
 	return
 }
 
@@ -54,6 +97,7 @@ func (b *Bucket) GetValues() (values map[string]map[string][]byte, err error) {
 	if err != nil {
 		return
 	}
+
 	values = map[string]map[string][]byte{
 		BUCKET_COLUMN_FAMILY: map[string][]byte{
 			"UID":        []byte(b.OwnerId),
@@ -63,6 +107,7 @@ func (b *Bucket) GetValues() (values map[string]map[string][]byte, err error) {
 			"createTime": []byte(b.CreateTime.Format(CREATE_TIME_LAYOUT)),
 			"versioning": []byte(b.Versioning),
 			"usage":      usage.Bytes(),
+			"UpdateTime": []byte(b.UpdateTime.Format(CREATE_TIME_LAYOUT)),
 		},
 		// TODO fancy ACL
 	}

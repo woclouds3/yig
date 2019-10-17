@@ -15,29 +15,41 @@ build_internal:
 	@[ -d $(GOBIN) ] || mkdir -p $(GOBIN)
 	@ln -nsf $(PWD) $(URLPATH)/$(REPO)
 	go build $(URL)/$(REPO)
+	bash plugins/build_plugins_internal.sh
 	go build $(URLPATH)/$(REPO)/tools/admin.go
 	go build $(URLPATH)/$(REPO)/tools/delete.go
 	go build $(URLPATH)/$(REPO)/tools/getrediskeys.go
 	go build $(URLPATH)/$(REPO)/tools/lc.go
 	cp -f yig $(PWD)/build/bin/
+	cp -f $(PWD)/plugins/*.so $(PWD)/integrate/yigconf/plugins/
 	cp -f admin $(PWD)/build/bin/
 	cp -f delete $(PWD)/build/bin/
 	cp -f getrediskeys $(PWD)/build/bin/
 	cp -f lc $(PWD)/build/bin/
+
 pkg:
-	sudo docker run --rm -v $(PWD):/work -w /work journeymidnight/yig bash -c 'bash package/rpmbuild.sh'
+	docker run --rm -v $(PWD):/work -w /work journeymidnight/yig bash -c 'bash package/rpmbuild.sh'
 image:
-	sudo docker build -t  journeymidnight/yig . -f integrate/yig.docker
+	docker build -t  journeymidnight/yig . -f integrate/yig.docker
 
 run: 
-	cd integrate && sudo bash runyig.sh
+	cd integrate && bash runyig.sh
+stop: 
+	cd integrate && bash stopyig.sh
+
 
 rundelete:
 	cd integrate && sudo bash rundelete.sh
 
 env:
-	cd integrate && sudo docker-compose stop && sudo docker-compose rm --force && sudo rm -rf cephconf && sudo docker-compose up -d && sleep 20 && sudo bash prepare_env.sh
+	cd integrate && docker-compose stop && docker-compose rm --force && sudo rm -rf cephconf && docker-compose up -d && sleep 20 && bash prepare_env.sh
 	
+plugin:
+	cd plugins && bash build_plugins.sh
+
+plugin_internal:
+	bash plugins/build_plugins_internal.sh
+
 
 integrate: env build run 
 

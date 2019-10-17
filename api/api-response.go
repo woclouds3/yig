@@ -22,12 +22,14 @@ import (
 	"path"
 	"time"
 
+	"net/url"
+	"strconv"
+
 	. "github.com/journeymidnight/yig/api/datatype"
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/iam/common"
 	meta "github.com/journeymidnight/yig/meta/types"
-	"net/url"
 )
 
 const (
@@ -58,7 +60,7 @@ func GetObjectLocation(bucketName string, key string) string {
 // Takes an array of Bucket metadata information for serialization
 // input: array of bucket metadata
 // output: populated struct that can be serialized to match xml and json api spec output
-func GenerateListBucketsResponse(buckets []meta.Bucket, credential common.Credential) ListBucketsResponse {
+func GenerateListBucketsResponse(buckets []*meta.Bucket, credential common.Credential) ListBucketsResponse {
 	var listBuckets []Bucket
 	var data = ListBucketsResponse{}
 	var owner = Owner{}
@@ -205,6 +207,12 @@ func WriteSuccessResponse(w http.ResponseWriter, response []byte) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	//ResponseRecorder
+	w.(*ResponseRecorder).status = http.StatusOK
+	w.(*ResponseRecorder).size = int64(len(response))
+
+	w.Header().Set("Content-Length", strconv.Itoa(len(response)))
+	w.WriteHeader(http.StatusOK)
 	w.Write(response)
 	w.(http.Flusher).Flush()
 }
@@ -216,16 +224,16 @@ func WriteSuccessNoContent(w http.ResponseWriter) {
 
 // writeErrorResponse write error headers
 func WriteErrorResponse(w http.ResponseWriter, r *http.Request, err error) {
-	WriteErrorResponseHeaders(w, err)
+	WriteErrorResponseHeaders(w, r, err)
 	WriteErrorResponseNoHeader(w, r, err, r.URL.Path)
 }
 
 func WriteErrorResponseWithResource(w http.ResponseWriter, r *http.Request, err error, resource string) {
-	WriteErrorResponseHeaders(w, err)
+	WriteErrorResponseHeaders(w, r, err)
 	WriteErrorResponseNoHeader(w, r, err, resource)
 }
 
-func WriteErrorResponseHeaders(w http.ResponseWriter, err error) {
+func WriteErrorResponseHeaders(w http.ResponseWriter, r *http.Request, err error) {
 	var status int
 	apiErrorCode, ok := err.(ApiError)
 	if ok {
@@ -233,7 +241,11 @@ func WriteErrorResponseHeaders(w http.ResponseWriter, err error) {
 	} else {
 		status = http.StatusInternalServerError
 	}
-	helper.Logger.Println(5, "Response status code:", status, "err:", err)
+	helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "Response status code:", status, "err:", err)
+
+	//ResponseRecorder
+	w.(*ResponseRecorder).status = status
+
 	w.WriteHeader(status)
 }
 
@@ -254,10 +266,14 @@ func WriteErrorResponseNoHeader(w http.ResponseWriter, req *http.Request, err er
 		errorResponse.Message = "We encountered an internal error, please try again."
 	}
 	errorResponse.Resource = resource
-	errorResponse.RequestId = requestIdFromContext(req.Context())
+	errorResponse.RequestId = RequestIdFromContext(req.Context())
 	errorResponse.HostId = helper.CONFIG.InstanceId
 
 	encodedErrorResponse := EncodeResponse(errorResponse)
+
+	//ResponseRecorder
+	w.(*ResponseRecorder).size = int64(len(encodedErrorResponse))
+
 	w.Write(encodedErrorResponse)
 	w.(http.Flusher).Flush()
 }

@@ -1,27 +1,28 @@
 package storage
 
 import (
+	"bytes"
 	"container/list"
 	"errors"
-	"fmt"
 	"io"
-	"io/ioutil"
 	"sync"
 
+	"fmt"
 	"github.com/journeymidnight/radoshttpd/rados"
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/log"
+	"time"
 )
 
 const (
 	MON_TIMEOUT         = "10"
 	OSD_TIMEOUT         = "10"
 	STRIPE_UNIT         = 512 << 10 /* 512K */
-	STRIPE_COUNT        = 1
-	OBJECT_SIZE         = 4 << 20         /* 4M */
+	STRIPE_COUNT        = 2
+	OBJECT_SIZE         = 8 << 20         /* 8M */
 	BUFFER_SIZE         = 1 << 20         /* 1M */
 	MIN_CHUNK_SIZE      = 512 << 10       /* 512K */
-	MAX_CHUNK_SIZE      = 4 * BUFFER_SIZE /* 4M */
+	MAX_CHUNK_SIZE      = 8 * BUFFER_SIZE /* 8M */
 	SMALL_FILE_POOLNAME = "rabbit"
 	BIG_FILE_POOLNAME   = "tiger"
 	BIG_FILE_THRESHOLD  = 128 << 10 /* 128K */
@@ -35,6 +36,8 @@ type CephStorage struct {
 	Logger     *log.Logger
 	CountMutex *sync.Mutex
 	Counter    uint64
+	BufPool    *sync.Pool
+	BigBufPool *sync.Pool
 }
 
 func NewCephStorage(configFile string, logger *log.Logger) *CephStorage {
@@ -72,6 +75,16 @@ func NewCephStorage(configFile string, logger *log.Logger) *CephStorage {
 		InstanceId: id,
 		Logger:     logger,
 		CountMutex: new(sync.Mutex),
+		BufPool: &sync.Pool{
+			New: func() interface{} {
+				return bytes.NewBuffer(make([]byte, BIG_FILE_THRESHOLD))
+			},
+		},
+		BigBufPool: &sync.Pool{
+			New: func() interface{} {
+				return make([]byte, MAX_CHUNK_SIZE)
+			},
+		},
 	}
 
 	logger.Printf(5, "Ceph Cluster %s is ready, InstanceId is %d\n", name, id)
@@ -138,20 +151,48 @@ func (c *CephStorage) Shutdown() {
 }
 
 func (cluster *CephStorage) doSmallPut(poolname string, oid string, data io.Reader) (size int64, err error) {
+	tstart := time.Now()
 	pool, err := cluster.Conn.OpenPool(poolname)
 	if err != nil {
 		return 0, errors.New("Bad poolname")
 	}
 	defer pool.Destroy()
-
-	buf, err := ioutil.ReadAll(data)
-	size = int64(len(buf))
-	if err != nil {
-		return 0, errors.New("Read from client failed")
+	tpool := time.Now()
+	dur := tpool.Sub(tstart).Nanoseconds() / 1000000
+	if dur >= 10 {
+		helper.Logger.Printf(5, "slow log: doSmallPut OpenPool(%s, %s) spent %d", poolname, oid, dur)
 	}
-	err = pool.WriteSmallObject(oid, buf)
+
+	buffer := cluster.BufPool.Get().(*bytes.Buffer)
+	buffer.Reset()
+	defer cluster.BufPool.Put(buffer)
+	written, err := buffer.ReadFrom(data)
+	if err != nil {
+		helper.Logger.Printf(2, "failed to read data for pool %s, oid %s, err: %v", poolname, oid, err)
+		return 0, err
+	}
+
+	size = written
+
+	tread := time.Now()
+	dur = tread.Sub(tpool).Nanoseconds() / 1000000
+	if dur >= 10 {
+		helper.Logger.Printf(5, "slow log: doSmallPut read body(%s, %s) spent %d", poolname, oid, dur)
+	}
+
+	err = pool.WriteSmallObject(oid, buffer.Bytes())
 	if err != nil {
 		return 0, err
+	}
+	twrite := time.Now()
+	dur = twrite.Sub(tread).Nanoseconds() / 1000000
+	if dur >= 50 {
+		helper.Logger.Printf(5, "slow log: doSmallPut ceph write(%s, %s) spent %d", poolname, oid, dur)
+	}
+
+	dur = twrite.Sub(tstart).Nanoseconds() / 1000000
+	if dur >= 100 {
+		helper.Logger.Printf(5, "slow log: doSmallPut fin(%s, %s) spent %d", poolname, oid, dur)
 	}
 
 	return size, nil
@@ -198,20 +239,19 @@ func (rd *RadosSmallDownloader) Close() error {
 }
 
 func (cluster *CephStorage) Put(poolname string, oid string, data io.Reader) (size int64, err error) {
-
 	if poolname == SMALL_FILE_POOLNAME {
 		return cluster.doSmallPut(poolname, oid, data)
 	}
 
 	pool, err := cluster.Conn.OpenPool(poolname)
 	if err != nil {
-		return 0, errors.New("Bad poolname")
+		return 0, fmt.Errorf("Bad poolname %s", poolname)
 	}
 	defer pool.Destroy()
 
 	striper, err := pool.CreateStriper()
 	if err != nil {
-		return 0, errors.New("Bad ioctx")
+		return 0, fmt.Errorf("Bad ioctx of pool %s", poolname)
 	}
 	defer striper.Destroy()
 
@@ -223,26 +263,34 @@ func (cluster *CephStorage) Put(poolname string, oid string, data io.Reader) (si
 	var c *rados.AioCompletion
 	pending := list.New()
 	var current_upload_window = MIN_CHUNK_SIZE /* initial window size as MIN_CHUNK_SIZE, max size is MAX_CHUNK_SIZE */
-	var pending_data = make([]byte, current_upload_window)
+	//var pending_data = make([]byte, current_upload_window)
+	var pending_data = cluster.BigBufPool.Get().([]byte)
+	defer func() {
+		cluster.BigBufPool.Put(pending_data)
+	}()
 
 	var slice_offset = 0
+	var slow_count = 0
+	// slice is the buffer size of reader, the size is equal to remain size of pending_data
 	var slice = pending_data[0:current_upload_window]
 
 	var offset uint64 = 0
 
 	for {
-
+		start := time.Now()
 		count, err := data.Read(slice)
+		if err != nil && err != io.EOF {
+			drain_pending(pending)
+			return 0, fmt.Errorf("Read from client failed. pool:%s oid:%s", poolname, oid)
+		}
 		if count == 0 {
 			break
 		}
+		// it's used to calculate next upload window
+		elapsed_time := time.Since(start)
 
 		slice_offset += count
-		slice = pending_data[slice_offset:current_upload_window]
-		if err != nil && err != io.EOF {
-			drain_pending(pending)
-			return 0, errors.New("Read from client failed")
-		}
+		slice = pending_data[slice_offset:]
 
 		//is pending_data full?
 		if slice_offset < len(pending_data) {
@@ -250,37 +298,54 @@ func (cluster *CephStorage) Put(poolname string, oid string, data io.Reader) (si
 		}
 
 		/* pending data is full now */
-		var bl []byte = pending_data[:]
-
-		/* allocate a new pending data */
-		pending_data = make([]byte, current_upload_window)
-		slice_offset = 0
-		slice = pending_data[0:current_upload_window]
-
 		c = new(rados.AioCompletion)
 		c.Create()
-		_, err = striper.WriteAIO(c, oid, bl, offset)
+		_, err = striper.WriteAIO(c, oid, pending_data, offset)
 		if err != nil {
 			c.Release()
 			drain_pending(pending)
-			return 0, errors.New("Bad io")
+			return 0, fmt.Errorf("Bad io. pool:%s oid:%s", poolname, oid)
 		}
 		pending.PushBack(c)
 
 		for pending_has_completed(pending) {
 			if ret := wait_pending_front(pending); ret < 0 {
 				drain_pending(pending)
-				return 0, errors.New("Error drain_pending in pending_has_completed")
+				return 0, fmt.Errorf("Error drain_pending in pending_has_completed(%d). pool:%s oid:%s", ret, poolname, oid)
 			}
 		}
 
 		if pending.Len() > AIO_CONCURRENT {
 			if ret := wait_pending_front(pending); ret < 0 {
 				drain_pending(pending)
-				return 0, errors.New("Error wait_pending_front")
+				return 0, fmt.Errorf("Error wait_pending_front(%d). pool:%s oid:%s", ret, poolname, oid)
 			}
 		}
-		offset += uint64(len(bl))
+		offset += uint64(len(pending_data))
+
+		/* Resize current upload window */
+		expected_time := count * 1000 * 1000 * 1000 / current_upload_window /* 1000 * 1000 * 1000 means use Nanoseconds */
+
+		// If the upload speed is less than half of the current upload window, reduce the upload window by half.
+		// If upload speed is larger than current window size per second, used the larger window and twice
+		if elapsed_time.Nanoseconds() > 2*int64(expected_time) {
+			if slow_count > 2 && current_upload_window > MIN_CHUNK_SIZE {
+				current_upload_window = current_upload_window >> 1
+				slow_count = 0
+			}
+			slow_count += 1
+		} else if int64(expected_time) > elapsed_time.Nanoseconds() {
+			/* if upload speed is fast enough, enlarge the current_upload_window a bit */
+			current_upload_window = current_upload_window << 1
+			if current_upload_window > MAX_CHUNK_SIZE {
+				current_upload_window = MAX_CHUNK_SIZE
+			}
+			slow_count = 0
+		}
+		/* allocate a new pending data */
+		//pending_data = make([]byte, current_upload_window)
+		slice_offset = 0
+		slice = pending_data[0:current_upload_window]
 	}
 
 	size = int64(uint64(slice_offset) + offset)
@@ -294,8 +359,98 @@ func (cluster *CephStorage) Put(poolname string, oid string, data io.Reader) (si
 
 	//drain_pending
 	if ret := drain_pending(pending); ret < 0 {
-		return 0, errors.New("Error drain_pending")
+		return 0, fmt.Errorf("Error wait_pending_front(%d). pool:%s oid:%s", ret, poolname, oid)
 	}
+	return size, nil
+}
+
+func (cluster *CephStorage) Append(poolname string, oid string, data io.Reader, offset uint64, isExist bool) (size int64, err error) {
+	if poolname != BIG_FILE_POOLNAME {
+		return 0, errors.New("specified pool must be used for storing big file.")
+	}
+
+	pool, err := cluster.Conn.OpenPool(poolname)
+	if err != nil {
+		return 0, fmt.Errorf("Bad poolname %s", poolname)
+	}
+	defer pool.Destroy()
+
+	striper, err := pool.CreateStriper()
+	if err != nil {
+		return 0, fmt.Errorf("Bad ioctx of pool %s", poolname)
+	}
+	defer striper.Destroy()
+
+	setStripeLayout(&striper)
+
+	var current_upload_window = MIN_CHUNK_SIZE /* initial window size as MIN_CHUNK_SIZE, max size is MAX_CHUNK_SIZE */
+	var pending_data = make([]byte, current_upload_window)
+
+	var origin_offset = offset
+	var slice_offset = 0
+	var slow_count = 0
+	// slice is the buffer size of reader, the size is equal to remain size of pending_data
+	var slice = pending_data[0:current_upload_window]
+	for {
+		start := time.Now()
+		count, err := data.Read(slice)
+
+		if count == 0 {
+			break
+		}
+		// it's used to calculate next upload window
+		elapsed_time := time.Since(start)
+
+		slice_offset += count
+		slice = pending_data[slice_offset:]
+
+		//is pending_data full?
+		if slice_offset < len(pending_data) {
+			continue
+		}
+
+		/* pending data is full now */
+		_, err = striper.Write(oid, pending_data, offset)
+		if err != nil {
+			return 0, fmt.Errorf("Bad io. pool:%s oid:%s", poolname, oid)
+		}
+
+		offset += uint64(len(pending_data))
+
+		/* Resize current upload window */
+		expected_time := count * 1000 * 1000 * 1000 / current_upload_window /* 1000 * 1000 * 1000 means use Nanoseconds */
+
+		// If the upload speed is less than half of the current upload window, reduce the upload window by half.
+		// If upload speed is larger than current window size per second, used the larger window and twice
+		if elapsed_time.Nanoseconds() > 2*int64(expected_time) {
+			if slow_count > 2 && current_upload_window > MIN_CHUNK_SIZE {
+				current_upload_window = current_upload_window >> 1
+				slow_count = 0
+			}
+			slow_count += 1
+		} else if int64(expected_time) > elapsed_time.Nanoseconds() {
+			/* if upload speed is fast enough, enlarge the current_upload_window a bit */
+			current_upload_window = current_upload_window << 1
+			if current_upload_window > MAX_CHUNK_SIZE {
+				current_upload_window = MAX_CHUNK_SIZE
+			}
+			slow_count = 0
+		}
+		/* allocate a new pending data */
+		pending_data = make([]byte, current_upload_window)
+		slice_offset = 0
+		slice = pending_data[0:current_upload_window]
+	}
+
+	size = int64(uint64(slice_offset) + offset - origin_offset)
+	//write all remaining data
+	if slice_offset > 0 {
+		_, err = striper.Write(oid, pending_data, offset)
+		if err != nil {
+			return 0, fmt.Errorf("Bad io. pool:%s oid:%s", poolname, oid)
+		}
+	}
+
 	return size, nil
 }
 

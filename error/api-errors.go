@@ -58,6 +58,7 @@ const (
 	ErrInvalidPartNumberMarker
 	ErrInvalidRequestBody
 	ErrInvalidCopySource
+	ErrInvalidCopySourceStorageClass
 	ErrInvalidCopyDest
 	ErrInvalidPrecondition
 	ErrInvalidPolicyDocument
@@ -108,6 +109,9 @@ const (
 	ErrInvalidCannedAcl
 	ErrInvalidSseHeader
 	ErrTooManyBuckets
+	ErrInvalidPosition
+	ErrObjectNotAppendable
+	ErrPositionNotEqualToLength
 	// Add new error codes here.
 
 	// SSE-S3 related API errors
@@ -142,6 +146,7 @@ const (
 	ErrNonUTF8Encode
 	ErrInvalidLc
 	ErrNoSuchBucketLc
+  ErrInvalidStorageClass
 
 	// Add new glacier error codes here.
 	ErrResourceNotFound
@@ -162,6 +167,11 @@ var ErrorCodeResponse = map[ApiErrorCode]ApiErrorStruct{
 	ErrInvalidCopySource: {
 		AwsErrorCode:   "InvalidArgument",
 		Description:    "Copy Source must mention the source bucket and key: sourcebucket/sourcekey.",
+		HttpStatusCode: http.StatusBadRequest,
+	},
+	ErrInvalidCopySourceStorageClass: {
+		AwsErrorCode:   "InvalidCopySourceStorageClass",
+		Description:    "Storage class of copy source cannot be GLACIER or DEEP_ARCHIVE.",
 		HttpStatusCode: http.StatusBadRequest,
 	},
 	ErrInvalidPrecondition: {
@@ -628,6 +638,26 @@ var ErrorCodeResponse = map[ApiErrorCode]ApiErrorStruct{
 	ErrInvalidLc: {
 		AwsErrorCode:   "IllegalLcConfigurationException",
 		Description:    "The LC configuration specified in the request is invalid.",
+		HttpStatusCode: http.StatusBadRequest,
+	},
+  ErrInvalidPosition: {
+		AwsErrorCode:   "InvalidPosition",
+		Description:    "The argument position specified in the request must be non-negative integer.",
+		HttpStatusCode: http.StatusBadRequest,
+	},
+	ErrObjectNotAppendable: {
+		AwsErrorCode:   "ObjectNotAppendable",
+		Description:    "Cannot perform an AppendObject operation on a non-Appendable Object.",
+		HttpStatusCode: http.StatusConflict,
+	},
+	ErrPositionNotEqualToLength: {
+		AwsErrorCode:   "PositionNotEqualToLength",
+		Description:    "The value of position does not match the length of the current Object.",
+		HttpStatusCode: http.StatusConflict,
+	},
+	ErrInvalidStorageClass: {
+		AwsErrorCode:   "InvalidStorageClass",
+		Description:    "The storage class you specified in header is invalid.",
 		HttpStatusCode: http.StatusBadRequest,
 	},
 	ErrResourceNotFound: {

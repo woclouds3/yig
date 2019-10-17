@@ -1,14 +1,24 @@
 package lib
 
 import (
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/journeymidnight/aws-sdk-go/aws"
+	"github.com/journeymidnight/aws-sdk-go/service/s3"
 	"github.com/journeymidnight/yig/api/datatype"
+	"net/url"
 	"os"
+	"strings"
+	"errors"
+	"fmt"
 )
 
 func GenTestObjectUrl(sc *S3Client) string {
 	return "http://" + *sc.Client.Config.Endpoint + string(os.PathSeparator) + TEST_BUCKET + string(os.PathSeparator) + TEST_KEY
+}
+
+func GenTestSpecialCharaterObjectUrl(sc *S3Client) string {
+	urlchange := url.QueryEscape(TEST_KEY_SPECIAL)
+	urlchange = strings.Replace(urlchange, "+", "%20", -1)
+	return "http://" + *sc.Client.Config.Endpoint + string(os.PathSeparator) + TEST_BUCKET + string(os.PathSeparator) + urlchange
 }
 
 func TransferToS3AccessControlPolicy(policy *datatype.AccessControlPolicy) (s3policy *s3.AccessControlPolicy) {
@@ -29,4 +39,44 @@ func TransferToS3AccessControlPolicy(policy *datatype.AccessControlPolicy) (s3po
 		s3policy.Grants = append(s3policy.Grants, grant)
 	}
 	return
+}
+
+func (sc *S3Client) CleanEnv() {
+	sc.DeleteObject(TEST_BUCKET, TEST_KEY)
+	sc.DeleteBucket(TEST_BUCKET)
+}
+
+type AccessPolicyGroup struct {
+	BucketPolicy string
+	BucketACL    string
+	ObjectACL    string
+}
+
+func (sc *S3Client) TestAnonymousAccessResult(policyGroup AccessPolicyGroup, resultCode int) (err error) {
+	err = sc.PutBucketPolicy(TEST_BUCKET, policyGroup.BucketPolicy)
+	if err != nil {
+		return
+	}
+
+	err = sc.PutBucketAcl(TEST_BUCKET, policyGroup.BucketACL)
+	if err != nil {
+		return
+	}
+
+	err = sc.PutObjectAcl(TEST_BUCKET, TEST_KEY, policyGroup.ObjectACL)
+	if err != nil {
+		return
+	}
+
+	status, val, err := HTTPRequestToGetObject(GenTestObjectUrl(sc))
+	if status != resultCode {
+		return errors.New(fmt.Sprint("Situation:", 1, "HTTPRequestToGetObject err:", err, "status:", status, "val:", val))
+	}
+
+	return nil
+}
+
+// Generate 128KiB part data
+func GenMinimalPart() []byte {
+	return make([]byte, 128<<10)
 }

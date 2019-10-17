@@ -1,24 +1,36 @@
 package meta
 
 import (
+	"context"
+	"fmt"
+
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
 	. "github.com/journeymidnight/yig/meta/types"
 	"github.com/journeymidnight/yig/redis"
 )
 
-func (m *Meta) GetCluster(fsid string, pool string) (cluster Cluster, err error) {
-	rowKey := fsid + ObjectNameSeparator + pool
-	getCluster := func() (c interface{}, err error) {
-		return m.Client.GetCluster(fsid, pool)
+const (
+	CLUSTER_CACHE_PREFIX = "cluster:"
+)
+
+func (m *Meta) GetCluster(ctx context.Context, fsid string, pool string) (cluster Cluster, err error) {
+	rowKey := fsid + ObjectNameEnding + pool
+	getCluster := func() (c helper.Serializable, err error) {
+		helper.Logger.Println(10, "[", helper.RequestIdFromContext(ctx), "]", "GetCluster CacheMiss. fsid:", fsid)
+		cl, err := m.Client.GetCluster(fsid, pool)
+		c = &cl
+		return c, err
 	}
-	unmarshaller := func(in []byte) (interface{}, error) {
-		var cluster Cluster
-		err := helper.MsgPackUnMarshal(in, &cluster)
-		return cluster, err
+
+	toCluster := func(fields map[string]string) (interface{}, error) {
+		c := &Cluster{}
+		return c.Deserialize(fields)
 	}
-	c, err := m.Cache.Get(redis.ClusterTable, rowKey, getCluster, unmarshaller, true)
+
+	c, err := m.Cache.Get(ctx, redis.ClusterTable, CLUSTER_CACHE_PREFIX, rowKey, getCluster, toCluster, true)
 	if err != nil {
+		helper.Logger.Println(20, fmt.Sprintf("[ %s ] failed to get cluster for fsid: %s, err: %v", helper.RequestIdFromContext(ctx), fsid, err))
 		return
 	}
 	cluster, ok := c.(Cluster)

@@ -21,12 +21,12 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
-	"github.com/journeymidnight/yig/crypto"
 	"io"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
+
+	"github.com/journeymidnight/yig/crypto"
 )
 
 // xmlDecoder provide decoded value in xml.
@@ -74,8 +74,15 @@ func contains(stringList []string, element string) bool {
 	return false
 }
 
-func requestIdFromContext(ctx context.Context) string {
-	return ctx.Value(RequestId).(string)
+func RequestIdFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	
+	if result, ok := ctx.Value(RequestContextKey).(RequestContext); ok {
+		return result.RequestId
+	}
+	return ""
 }
 
 // We support '.' with bucket names but we fallback to using path
@@ -133,7 +140,6 @@ func xmlFormat(data interface{}) ([]byte, error) {
 
 func setXmlHeader(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "application/xml")
-	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 }
 
 // hasServerSideEncryptionHeader returns true if the given HTTP header
