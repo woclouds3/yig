@@ -32,11 +32,13 @@ func RegisterAPIRouter(mux *router.Router, api ObjectAPIHandlers) {
 	apiRouter := mux.NewRoute().PathPrefix("/").Subrouter()
 
 	var routers []*router.Router
-	// Bucket router, matches domain.name/bucket_name/object_name
-	bucket := apiRouter.Host(helper.CONFIG.S3Domain).PathPrefix("/{bucket}").Subrouter()
-	// Host router, matches bucket_name.domain.name/object_name
-	bucket_host := apiRouter.Host("{bucket:.+}." + helper.CONFIG.S3Domain).Subrouter()
-	routers = append(routers, bucket, bucket_host)
+	for _, domain := range helper.CONFIG.S3Domain {
+		// Bucket router, matches domain.name/bucket_name/object_name
+		bucket := apiRouter.Host(domain).PathPrefix("/{bucket}").Subrouter()
+		// Host router, matches bucket_name.domain.name/object_name
+		bucket_host := apiRouter.Host("{bucket:.+}." + domain).Subrouter()
+		routers = append(routers, bucket, bucket_host)
+	}
 
 	for _, bucket := range routers {
 		/// Object operations
@@ -70,8 +72,14 @@ func RegisterAPIRouter(mux *router.Router, api ObjectAPIHandlers) {
 		// GetObjectAcl
 		bucket.Methods("GET").Path("/{object:.+}").HandlerFunc(api.GetObjectAclHandler).
 			Queries("acl", "")
+
+		// AppendObject
+		bucket.Methods("POST").Path("/{object:.+}").HandlerFunc(api.AppendObjectHandler).Queries("append", "")
 		// PutObject
 		bucket.Methods("PUT").Path("/{object:.+}").HandlerFunc(api.PutObjectHandler)
+		// PostObject
+		bucket.Methods("POST").HeadersRegexp("Content-Type", "multipart/form-data*").
+			HandlerFunc(api.PostObjectHandler)
 		// GetObject
 		bucket.Methods("GET").Path("/{object:.+}").HandlerFunc(api.GetObjectHandler)
 		// DeleteObject
@@ -114,9 +122,6 @@ func RegisterAPIRouter(mux *router.Router, api ObjectAPIHandlers) {
 
 		// HeadBucket
 		bucket.Methods("HEAD").HandlerFunc(api.HeadBucketHandler)
-		// PostPolicy
-		bucket.Methods("POST").HeadersRegexp("Content-Type", "multipart/form-data*").
-			HandlerFunc(api.PostPolicyBucketHandler)
 		// DeleteMultipleObjects
 		bucket.Methods("POST").HandlerFunc(api.DeleteMultipleObjectsHandler)
 		// DeleteBucket

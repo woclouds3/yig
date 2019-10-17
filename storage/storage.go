@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"io"
+	"path"
 	"path/filepath"
 	"sync"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/log"
 	"github.com/journeymidnight/yig/meta"
-	"path"
 )
 
 const (
@@ -41,12 +41,11 @@ type YigStorage struct {
 }
 
 func New(logger *log.Logger, metaCacheType int, enableDataCache bool, CephConfigPattern string) *YigStorage {
-	metaStorage := meta.New(logger, meta.CacheType(metaCacheType))
 	kms := crypto.NewKMS()
 	yig := YigStorage{
 		DataStorage: make(map[string]*CephStorage),
 		DataCache:   newDataCache(enableDataCache),
-		MetaStorage: metaStorage,
+		MetaStorage: meta.New(logger, meta.CacheType(metaCacheType)),
 		KMS:         kms,
 		Logger:      logger,
 		Stopping:    false,
@@ -69,7 +68,14 @@ func New(logger *log.Logger, metaCacheType int, enableDataCache bool, CephConfig
 		}
 	}
 
+	if len(yig.DataStorage) == 0 {
+		helper.Logger.Panic(0, "PANIC: No data storage can be used!")
+	}
+
 	initializeRecycler(&yig)
+	if enableDataCache {
+		initializeMetaSyncWorker(&yig)
+	}
 	return &yig
 }
 
@@ -78,6 +84,8 @@ func (y *YigStorage) Stop() {
 	helper.Logger.Print(5, "Stopping storage...")
 	y.WaitGroup.Wait()
 	helper.Logger.Println(5, "done")
+	helper.Logger.Print(5, "Stopping MetaStorage...")
+	y.MetaStorage.Stop()
 }
 
 func (yig *YigStorage) encryptionKeyFromSseRequest(sseRequest datatype.SseRequest, bucket, object string) (key []byte, encKey []byte, err error) {

@@ -26,6 +26,10 @@ import (
 	meta "github.com/journeymidnight/yig/meta/types"
 )
 
+// Refer: https://docs.aws.amazon.com/AmazonS3/latest/API/RESTCommonResponseHeaders.html
+var CommonS3ResponseHeaders = []string{"Content-Length", "Content-Type", "Connection", "Date", "ETag", "Server",
+	"x-amz-delete-marker", "x-amz-id-2", "x-amz-request-id", "x-amz-version-id"}
+
 // Encodes the response headers into XML format.
 func EncodeResponse(response interface{}) []byte {
 	var bytesBuffer bytes.Buffer
@@ -47,18 +51,20 @@ func SetObjectHeaders(w http.ResponseWriter, object *meta.Object, contentRange *
 		w.Header()["ETag"] = []string{"\"" + object.Etag + "\""}
 	}
 
-	var existCacheControl bool
 	for key, val := range object.CustomAttributes {
-		if key == "Cache-Control" {
-			existCacheControl = true
-		}
 		w.Header().Set(key, val)
 	}
-	if !existCacheControl {
+	//default cache-control is no-store
+	if _, ok := object.CustomAttributes["Cache-Control"]; !ok {
 		w.Header().Set("Cache-Control", "no-store")
 	}
 
+	w.Header().Set("X-Amz-Object-Type", object.ObjectTypeToString())
+	w.Header().Set("X-Amz-Storage-Class", object.StorageClass.ToString())
 	w.Header().Set("Content-Length", strconv.FormatInt(object.Size, 10))
+	if object.Type == meta.ObjectTypeAppendable {
+		w.Header().Set("X-Amz-Next-Append-Position", strconv.FormatInt(object.Size, 10))
+	}
 
 	// for providing ranged content
 	if contentRange != nil && contentRange.OffsetBegin > -1 {

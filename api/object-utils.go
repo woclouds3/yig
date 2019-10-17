@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+	"fmt"
 )
 
 // validBucket regexp.
@@ -75,9 +76,25 @@ func isValidObjectName(objectName string) bool {
 			return false
 		}
 		c := string(n)
-		if strings.ContainsAny(c, "&$=;:+ ,?\\^`><{}][#%\"'~|") {
+		if strings.ContainsAny(c, "\\") {
 			return false
 		}
 	}
 	return true
+}
+
+// Argument position in handler AppendObject must be non-negative integer
+func checkPosition(position string) (uint64, error) {
+	p, err := strconv.ParseUint(position, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if p < 0 {
+		return 0, fmt.Errorf("position must ben on-negative integer.")
+	}
+	return p, nil
+}
+
+func isFirstAppend(position uint64) bool {
+	return position == 0
 }

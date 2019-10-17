@@ -44,6 +44,8 @@ func (t *TidbClient) GetObject(bucketName, objectName, version string) (object *
 		&object.SseType,
 		&object.EncryptionKey,
 		&object.InitializationVector,
+		&object.Type,
+		&object.StorageClass,
 	)
 	if err == sql.ErrNoRows {
 		err = ErrNoSuchKey
@@ -115,21 +117,32 @@ func (t *TidbClient) UpdateObjectAcl(object *Object) error {
 	return err
 }
 
+func (t *TidbClient) UpdateObjectAttrs(object *Object) error {
+	sql, args := object.GetUpdateAttrsSql()
+	_, err := t.Client.Exec(sql, args...)
+	return err
+}
+
+func (t *TidbClient) UpdateAppendObject(o *Object) (err error) {
+	sql, args := o.GetAppendSql()
+	_, err = t.Client.Exec(sql, args...)
+	return err
+}
+
 func (t *TidbClient) PutObject(object *Object, tx interface{}) (err error) {
 	var sqlTx *sql.Tx
 	if tx == nil {
 		tx, err = t.Client.Begin()
 		defer func() {
+			if err == nil {
+				err = sqlTx.Commit()
+			}
 			if err != nil {
 				sqlTx.Rollback()
-			} else {
-				sqlTx.Commit()
 			}
 		}()
-	} else {
-		sqlTx, _ = tx.(*sql.Tx)
 	}
-
+	sqlTx, _ = tx.(*sql.Tx)
 	sql, args := object.GetCreateSql()
 	_, err = sqlTx.Exec(sql, args...)
 	if object.Parts != nil {
@@ -151,15 +164,15 @@ func (t *TidbClient) DeleteObject(object *Object, tx interface{}) (err error) {
 	if tx == nil {
 		tx, err = t.Client.Begin()
 		defer func() {
+			if err == nil {
+				err = sqlTx.Commit()
+			}
 			if err != nil {
 				sqlTx.Rollback()
-			} else {
-				sqlTx.Commit()
 			}
 		}()
-	} else {
-		sqlTx, _ = tx.(*sql.Tx)
 	}
+	sqlTx, _ = tx.(*sql.Tx)
 
 	v := math.MaxUint64 - uint64(object.LastModifiedTime.UnixNano())
 	version := strconv.FormatUint(v, 10)
@@ -176,16 +189,6 @@ func (t *TidbClient) DeleteObject(object *Object, tx interface{}) (err error) {
 	return nil
 }
 
-/*
-func (t *TidbClient) DeleteObject(object *Object) error {
-	sql, err := object.GetDeleteSql()
-	if err != nil {
-		return err
-	}
-	_, err = t.Client.Exec(sql)
-	return err
-}
-*/
 //util function
 func getParts(bucketName, objectName string, version uint64, cli *sql.DB) (parts map[int]*Part, err error) {
 	parts = make(map[int]*Part)

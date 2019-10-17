@@ -19,13 +19,14 @@ package api
 import (
 	"crypto/md5"
 	"encoding/base64"
+	"io"
+	"net/http"
+	"strings"
+
 	. "github.com/journeymidnight/yig/api/datatype"
 	"github.com/journeymidnight/yig/crypto"
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
-	"io"
-	"net/http"
-	"strings"
 )
 
 // validates location constraint from the request body.
@@ -59,11 +60,14 @@ func isValidLocationConstraint(reqBody io.Reader) (err error) {
 
 // Supported headers that needs to be extracted.
 var supportedHeaders = []string{
-	"Content-Type",
-	"Cache-Control",
-	"Content-Encoding",
-	"Content-Disposition",
-	// Add more supported headers here, in "canonical" form
+	"cache-control",
+	"content-disposition",
+	"content-encoding",
+	"content-language",
+	"content-type",
+	"expires",
+	"website-redirect-location",
+	// Add more supported headers here
 }
 
 // extractMetadataFromHeader extracts metadata from HTTP header.
@@ -71,13 +75,13 @@ func extractMetadataFromHeader(header http.Header) map[string]string {
 	metadata := make(map[string]string)
 	// Save standard supported headers.
 	for _, supportedHeader := range supportedHeaders {
-		if h := header.Get(supportedHeader); h != "" {
+		if h := header.Get(http.CanonicalHeaderKey(supportedHeader)); h != "" {
 			metadata[supportedHeader] = h
 		}
 	}
 	// Go through all other headers for any additional headers that needs to be saved.
 	for key := range header {
-		if strings.HasPrefix(key, "X-Amz-Meta-") {
+		if strings.HasPrefix(strings.ToLower(key), "x-amz-meta-") {
 			metadata[key] = header.Get(key)
 		}
 	}

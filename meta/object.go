@@ -1,33 +1,41 @@
 package meta
 
 import (
+	"context"
+	"time"
+
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
 	. "github.com/journeymidnight/yig/meta/types"
 	"github.com/journeymidnight/yig/redis"
 )
 
-func (m *Meta) GetObject(bucketName string, objectName string, willNeed bool) (object *Object, err error) {
-	getObject := func() (o interface{}, err error) {
+const (
+	OBJECT_CACHE_PREFIX = "object:"
+)
+
+func (m *Meta) GetObject(ctx context.Context, bucketName string, objectName string, willNeed bool) (object *Object, err error) {
+	getObject := func() (o helper.Serializable, err error) {
+		helper.Logger.Println(10, "[", helper.RequestIdFromContext(ctx), "]", "GetObject CacheMiss. bucket:", bucketName, "object:", objectName)
 		object, err := m.Client.GetObject(bucketName, objectName, "")
 		if err != nil {
 			return
 		}
-		helper.Debugln("GetObject object.Name:", object.Name)
+		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "GetObject object.Name:", object.Name)
 		if object.Name != objectName {
 			err = ErrNoSuchKey
 			return
 		}
 		return object, nil
 	}
-	unmarshaller := func(in []byte) (interface{}, error) {
-		var object Object
-		err := helper.MsgPackUnMarshal(in, &object)
-		return &object, err
+
+	toObject := func(fields map[string]string) (interface{}, error) {
+		o := &Object{}
+		return o.Deserialize(fields)
 	}
 
-	o, err := m.Cache.Get(redis.ObjectTable, bucketName+":"+objectName+":",
-		getObject, unmarshaller, willNeed)
+	o, err := m.Cache.Get(ctx, redis.ObjectTable, OBJECT_CACHE_PREFIX, bucketName+":"+objectName+":",
+		getObject, toObject, willNeed)
 	if err != nil {
 		return
 	}
@@ -48,8 +56,8 @@ func (m *Meta) GetObjectMap(bucketName, objectName string) (objMap *ObjMap, err 
 	return
 }
 
-func (m *Meta) GetObjectVersion(bucketName, objectName, version string, willNeed bool) (object *Object, err error) {
-	getObjectVersion := func() (o interface{}, err error) {
+func (m *Meta) GetObjectVersion(ctx context.Context, bucketName, objectName, version string, willNeed bool) (object *Object, err error) {
+	getObjectVersion := func() (o helper.Serializable, err error) {
 		object, err := m.Client.GetObject(bucketName, objectName, version)
 		if err != nil {
 			return
@@ -60,13 +68,14 @@ func (m *Meta) GetObjectVersion(bucketName, objectName, version string, willNeed
 		}
 		return object, nil
 	}
-	unmarshaller := func(in []byte) (interface{}, error) {
-		var object Object
-		err := helper.MsgPackUnMarshal(in, &object)
-		return &object, err
+
+	toObject := func(fields map[string]string) (interface{}, error) {
+		o := &Object{}
+		return o.Deserialize(fields)
 	}
-	o, err := m.Cache.Get(redis.ObjectTable, bucketName+":"+objectName+":"+version,
-		getObjectVersion, unmarshaller, willNeed)
+
+	o, err := m.Cache.Get(ctx, redis.ObjectTable, OBJECT_CACHE_PREFIX, bucketName+":"+objectName+":"+version,
+		getObjectVersion, toObject, willNeed)
 	if err != nil {
 		return
 	}
@@ -78,13 +87,12 @@ func (m *Meta) GetObjectVersion(bucketName, objectName, version string, willNeed
 	return object, nil
 }
 
-func (m *Meta) PutObject(object *Object, multipart *Multipart, objMap *ObjMap, updateUsage bool) error {
+func (m *Meta) PutObject(ctx context.Context, object *Object, multipart *Multipart, objMap *ObjMap, updateUsage bool) error {
+	tstart := time.Now()
 	tx, err := m.Client.NewTrans()
 	defer func() {
 		if err != nil {
 			m.Client.AbortTrans(tx)
-		} else {
-			m.Client.CommitTrans(tx)
 		}
 	}()
 
@@ -107,11 +115,26 @@ func (m *Meta) PutObject(object *Object, multipart *Multipart, objMap *ObjMap, u
 		}
 	}
 
+	requestId := helper.RequestIdFromContext(ctx)
 	if updateUsage {
-		err = m.Client.UpdateUsage(object.BucketName, object.Size, tx)
+		ustart := time.Now()
+		err = m.UpdateUsage(ctx, object.BucketName, object.Size)
 		if err != nil {
 			return err
 		}
+		uend := time.Now()
+		dur := uend.Sub(ustart)
+		if dur/1000000 >= 100 {
+			helper.Logger.Printf(5, "[ %s ] slow log: UpdateUsage, bucket %s, obj: %s, size: %d, takes %d",
+				requestId, object.BucketName, object.Name, object.Size, dur)
+		}
+	}
+	err = m.Client.CommitTrans(tx)
+	tend := time.Now()
+	dur := tend.Sub(tstart)
+	if dur/1000000 >= 100 {
+		helper.Logger.Printf(5, "[ %s ] slow log: MetaPutObject: bucket: %s, obj: %s, size: %d, takes %d",
+			requestId, object.BucketName, object.Name, object.Size, dur)
 	}
 	return nil
 }
@@ -126,18 +149,21 @@ func (m *Meta) UpdateObjectAcl(object *Object) error {
 	return err
 }
 
+func (m *Meta) UpdateObjectAttrs(object *Object) error {
+	err := m.Client.UpdateObjectAttrs(object)
+	return err
+}
+
 func (m *Meta) PutObjMapEntry(objMap *ObjMap) error {
 	err := m.Client.PutObjectMap(objMap, nil)
 	return err
 }
 
-func (m *Meta) DeleteObject(object *Object, DeleteMarker bool, objMap *ObjMap) error {
+func (m *Meta) DeleteObject(ctx context.Context, object *Object, DeleteMarker bool, objMap *ObjMap) error {
 	tx, err := m.Client.NewTrans()
 	defer func() {
 		if err != nil {
 			m.Client.AbortTrans(tx)
-		} else {
-			m.Client.CommitTrans(tx)
 		}
 	}()
 
@@ -162,12 +188,20 @@ func (m *Meta) DeleteObject(object *Object, DeleteMarker bool, objMap *ObjMap) e
 		return err
 	}
 
-	err = m.Client.UpdateUsage(object.BucketName, -object.Size, tx)
+	err = m.UpdateUsage(ctx, object.BucketName, -object.Size)
 	if err != nil {
 		return err
 	}
+	err = m.Client.CommitTrans(tx)
 
 	return err
+}
+
+func (m *Meta) AppendObject(object *Object, isExist bool) error {
+	if !isExist {
+		return m.Client.PutObject(object, nil)
+	}
+	return m.Client.UpdateAppendObject(object)
 }
 
 //func (m *Meta) DeleteObjectEntry(object *Object) error {
