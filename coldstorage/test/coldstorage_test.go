@@ -1,4 +1,4 @@
-package _go
+package test
 
 import (
 	"bytes"
@@ -33,7 +33,7 @@ type InventoryRetrieval struct {
 }
 
 func TestColdStorage(t *testing.T) {
-	gcli := NewGlacierClient("10.3.221.31:9100", "us-east-1", "I4HZTE4SI1P53CZ1FVY8", "rKsJ3tEzIWvIfLyI7GK1ea2UCwVBRep7Mli3oGMZ")
+	gcli := NewGlacierClient("XXX:XX", "XXX", "XXX", "XXX")
 	err := gcli.CreateVault("-", "VaultTest")
 	if err != nil {
 		t.Fatal("Create vault fail:", err)
