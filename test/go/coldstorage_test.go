@@ -3,7 +3,6 @@ package _go
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -157,7 +156,7 @@ func TestColdStorage(t *testing.T) {
 	var inventoryretrieval InventoryRetrieval
 	err = json.Unmarshal(body, &inventoryretrieval)
 	if err != nil {
-		fmt.Println("json.Unmarshal fail:", err)
+		t.Fatal("json.Unmarshal fail:", err)
 	} else {
 		if inventoryretrieval.VaultName == "VaultTest" {
 			t.Log("GetJobOutput inventory-retrieval success further!")
