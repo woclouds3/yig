@@ -44,6 +44,7 @@ install -D -m 644 package/yig_lc.logrotate %{buildroot}/etc/logrotate.d/yig_lc.l
 install -D -m 644 package/yig.service   %{buildroot}/usr/lib/systemd/system/yig.service
 install -D -m 644 package/yig_delete.service   %{buildroot}/usr/lib/systemd/system/yig_delete.service
 install -D -m 644 package/yig_lc.service   %{buildroot}/usr/lib/systemd/system/yig_lc.service
+install -D -m 644 plugins/wocloud_iam_plugin.so   %{buildroot}/usr/lib64/wocloud_iam_plugin.so
 install -D -m 644 conf/yig.toml %{buildroot}%{_sysconfdir}/yig/yig.toml
 install -d %{buildroot}/var/log/yig/
 
@@ -68,6 +69,7 @@ rm -rf %{buildroot}
 /usr/bin/yig_delete_daemon
 /usr/bin/yig_getrediskeys
 /usr/bin/yig_lifecyle_daemon
+/usr/lib64/wocloud_iam_plugin.so
 /etc/logrotate.d/yig.logrotate
 /etc/logrotate.d/access.logrotate
 /etc/logrotate.d/yig_delete.logrotate
