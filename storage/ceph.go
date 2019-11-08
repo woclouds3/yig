@@ -8,10 +8,11 @@ import (
 	"sync"
 
 	"fmt"
+	"time"
+
 	"github.com/journeymidnight/radoshttpd/rados"
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/log"
-	"time"
 )
 
 const (
@@ -202,6 +203,7 @@ type RadosSmallDownloader struct {
 	oid       string
 	offset    int64
 	remaining int64
+	size      int64
 	pool      *rados.Pool
 }
 
@@ -225,12 +227,22 @@ func (rd *RadosSmallDownloader) Seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case 0:
 		rd.offset = offset
+		rd.remaining = rd.size - offset
 	case 1:
 		rd.offset += offset
+		rd.remaining -= offset
 	case 2:
 		panic("Not implemented")
 	}
 	return rd.offset, nil
+}
+
+func (rd *RadosSmallDownloader) Len() int {
+	if rd.remaining >= 0 {
+		return int(rd.remaining)
+	}
+
+	return 0
 }
 
 func (rd *RadosSmallDownloader) Close() error {
@@ -459,6 +471,7 @@ type RadosDownloader struct {
 	oid       string
 	offset    int64
 	remaining int64
+	size      int64
 	pool      *rados.Pool
 }
 
@@ -482,12 +495,22 @@ func (rd *RadosDownloader) Seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case 0:
 		rd.offset = offset
+		rd.remaining = rd.size - offset
 	case 1:
 		rd.offset += offset
+		rd.remaining -= offset
 	case 2:
 		panic("Not implemented")
 	}
 	return rd.offset, nil
+}
+
+func (rd *RadosDownloader) Len() int {
+	if rd.remaining >= 0 {
+		return int(rd.remaining)
+	}
+
+	return 0
 }
 
 func (rd *RadosDownloader) Close() error {
@@ -510,6 +533,7 @@ func (cluster *CephStorage) getReader(poolName string, oid string, startOffset i
 			offset:    startOffset,
 			pool:      pool,
 			remaining: length,
+			size:      length,
 		}
 
 		return radosSmallReader, nil
@@ -533,6 +557,7 @@ func (cluster *CephStorage) getReader(poolName string, oid string, startOffset i
 		offset:    startOffset,
 		pool:      pool,
 		remaining: length,
+		size:      length,
 	}
 
 	return radosReader, nil

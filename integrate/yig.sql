@@ -69,6 +69,8 @@ CREATE TABLE `gc` (
   `mtime` datetime DEFAULT NULL,
   `part` tinyint(1) DEFAULT NULL,
   `triedtimes` int(11) DEFAULT NULL,
+  `storageclass` tinyint(1) DEFAULT 0,
+  `ownerid` varchar(255) DEFAULT NULL,
    UNIQUE KEY `rowkey` (`bucketname`,`objectname`,`version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -240,8 +242,20 @@ CREATE TABLE `users` (
 DROP TABLE IF EXISTS `lifecycle`;
 CREATE TABLE `lifecycle` (
                        `bucketname` varchar(255) DEFAULT NULL,
-                       `status` varchar(255) DEFAULT NULL
+                       `status` varchar(255) DEFAULT NULL,
+  UNIQUE KEY (`bucketname`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
 ALTER TABLE buckets
 ADD COLUMN update_time datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+
+DROP TABLE IF EXISTS `archives`;
+CREATE TABLE `archives` (
+  `bucketname` varchar(255) DEFAULT NULL,
+  `objectname` varchar(255) DEFAULT NULL,
+  `objectid` varchar(255) DEFAULT NULL,
+  `archiveid` varchar(255) DEFAULT NULL,
+  `jobid` varchar(255) DEFAULT NULL,
+  `expiredays` bigint(20) DEFAULT NULL,
+  UNIQUE KEY `rowkey` (`bucketname`,`objectname`,`objectid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;

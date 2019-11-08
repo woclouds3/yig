@@ -20,6 +20,7 @@ import (
 	"encoding/xml"
 	"net/http"
 	"path"
+	"strings"
 	"time"
 
 	"net/url"
@@ -69,6 +70,9 @@ func GenerateListBucketsResponse(buckets []*meta.Bucket, credential common.Crede
 	owner.DisplayName = credential.DisplayName
 
 	for _, bucket := range buckets {
+		if strings.HasPrefix(bucket.Name, meta.HIDDEN_BUCKET_PREFIX) {
+			continue
+		}
 		var listbucket = Bucket{}
 		listbucket.Name = bucket.Name
 		listbucket.CreationDate = bucket.CreateTime.Format(timeFormatAMZ)

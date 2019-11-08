@@ -24,3 +24,7 @@ func (m *Meta) RemoveBucketFromLifeCycle(ctx context.Context, bucket *Bucket) er
 func (m *Meta) ScanLifeCycle(ctx context.Context, limit int, marker string) (result ScanLifeCycleResult, err error) {
 	return m.Client.ScanLifeCycle(ctx, limit, marker)
 }
+
+func (m *Meta) ScanHiddenBuckets(ctx context.Context, limit int, marker string) (buckets []string, truncated bool, err error) {
+	return m.Client.ScanHiddenBuckets(ctx, limit, marker)
+}

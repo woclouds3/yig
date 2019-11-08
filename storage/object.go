@@ -532,7 +532,7 @@ func (yig *YigStorage) PutObject(ctx context.Context, bucketName string, objectN
 	}
 	if bytesWritten < size {
 		RecycleQueue <- maybeObjectToRecycle
-		helper.Logger.Printf(2, "[", helper.RequestIdFromContext(ctx), "]", "failed to write objects, already written(%d), total size(%d)", bytesWritten, size)
+		helper.Logger.Printf(2, "[ %s ] failed to write objects, already written(%d), total size(%d)", helper.RequestIdFromContext(ctx), bytesWritten, size)
 		return result, ErrIncompleteBody
 	}
 
@@ -1156,6 +1156,31 @@ func (yig *YigStorage) DeleteObject(ctx context.Context, bucketName string, obje
 		}
 	} // TODO policy and fancy ACL
 
+	if helper.CONFIG.EnableGlacier {
+		object, err := yig.GetObjectInfo(ctx, bucketName, objectName, version, credential)
+		if err == nil && object.StorageClass == meta.ObjectStorageClassGlacier && object.SseType == "" {
+			// Remove restored object if any. Must done before delete object.
+			// TODO: object version is not verifed here.
+			restoredObjectName := yig.GetRestoredObjectName(ctx,
+				&meta.Object{
+					BucketName: bucketName,
+					Name:       objectName,
+					ObjectId:   object.ObjectId,
+				})
+			restoredBucketName := meta.HIDDEN_BUCKET_PREFIX + credential.UserId
+			if restoredObjectName != "" {
+				_ = yig.removeAllObjectsEntryByName(ctx, restoredBucketName, restoredObjectName)
+			}
+
+			yig.MetaStorage.Cache.Remove(redis.ObjectTable, obj.OBJECT_CACHE_PREFIX, restoredBucketName+":"+restoredObjectName+":")
+			yig.DataCache.Remove(restoredBucketName + ":" + restoredObjectName + ":")
+			yig.DataCache.Remove(restoredBucketName + ":" + restoredObjectName + ":" + "null")
+		} else {
+			yig.Logger.Printf(20, "[ %s ] GetObjectInfo failed %s %s %s %v", helper.RequestIdFromContext(ctx),
+				bucketName, objectName, version, credential)
+		}
+	}
+
 	switch bucket.Versioning {
 	case "Disabled":
 		if version != "" && version != "null" {
@@ -1212,6 +1237,7 @@ func (yig *YigStorage) DeleteObject(ctx context.Context, bucketName string, obje
 			yig.DataCache.Remove(bucketName + ":" + objectName + ":" + version)
 		}
 	}
+
 	return result, nil
 }
 

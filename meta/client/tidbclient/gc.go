@@ -31,8 +31,8 @@ func (t *TidbClient) PutObjectToGarbageCollection(object *Object, tx interface{}
 	}
 	mtime := o.MTime.Format(TIME_LAYOUT_TIDB)
 	version := math.MaxUint64 - uint64(object.LastModifiedTime.UnixNano())
-	sqltext := "insert ignore into gc(bucketname,objectname,version,location,pool,objectid,status,mtime,part,triedtimes) values(?,?,?,?,?,?,?,?,?,?);"
-	_, err = sqlTx.Exec(sqltext, o.BucketName, o.ObjectName, version, o.Location, o.Pool, o.ObjectId, o.Status, mtime, hasPart, o.TriedTimes)
+	sqltext := "insert ignore into gc(bucketname,objectname,version,location,pool,objectid,status,mtime,part,triedtimes,storageclass,ownerid) values(?,?,?,?,?,?,?,?,?,?,?,?);"
+	_, err = sqlTx.Exec(sqltext, o.BucketName, o.ObjectName, version, o.Location, o.Pool, o.ObjectId, o.Status, mtime, hasPart, o.TriedTimes, o.StorageClass, o.OwnerId)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (t *TidbClient) RemoveGarbageCollection(garbage GarbageCollection) error {
 
 //util func
 func (t *TidbClient) GetGarbageCollection(bucketName, objectName, version string) (gc GarbageCollection, err error) {
-	sqltext := "select bucketname,objectname,version,location,pool,objectid,status,mtime,part,triedtimes from gc where bucketname=? and objectname=? and version=?;"
+	sqltext := "select bucketname,objectname,version,location,pool,objectid,status,mtime,part,triedtimes,storageclass,ownerid from gc where bucketname=? and objectname=? and version=?;"
 	var hasPart bool
 	var mtime string
 	var v string
@@ -131,6 +131,8 @@ func (t *TidbClient) GetGarbageCollection(bucketName, objectName, version string
 		&mtime,
 		&hasPart,
 		&gc.TriedTimes,
+		&gc.StorageClass,
+		&gc.OwnerId,
 	)
 	gc.MTime, err = time.Parse(TIME_LAYOUT_TIDB, mtime)
 	if err != nil {
@@ -182,5 +184,7 @@ func GarbageCollectionFromObject(o *Object) (gc GarbageCollection) {
 	gc.MTime = time.Now().UTC()
 	gc.Parts = o.Parts
 	gc.TriedTimes = 0
+	gc.StorageClass = o.StorageClass
+	gc.OwnerId	= o.OwnerId
 	return
 }

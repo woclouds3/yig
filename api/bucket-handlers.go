@@ -29,6 +29,7 @@ import (
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/iam/common"
+	meta "github.com/journeymidnight/yig/meta/types"
 	"github.com/journeymidnight/yig/signature"
 )
 
@@ -337,7 +338,7 @@ func (api ObjectAPIHandlers) PutBucketHandler(w http.ResponseWriter, r *http.Req
 	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "PutBucketHandler", "enter")
 	vars := mux.Vars(r)
 	bucketName := strings.ToLower(vars["bucket"])
-	if !isValidBucketName(bucketName) {
+	if !isValidBucketName(bucketName) || strings.HasPrefix(bucketName, meta.HIDDEN_BUCKET_PREFIX) {
 		WriteErrorResponse(w, r, ErrInvalidBucketName)
 		return
 	}
@@ -408,6 +409,50 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 	}
 
 	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Set LC:", lc)
+
+	// Check whether Glacier is supported.
+	// By default, we only support STANDARD.
+	if helper.CONFIG.EnableGlacier {
+		createVaultFlag := false
+		for _, rule := range lc.Rule {
+			if rule.TransitionStorageClass == "" || rule.TransitionStorageClass == "STANDARD" {
+				continue
+			}
+
+			if rule.TransitionStorageClass == "GLACIER" && helper.CONFIG.EnableGlacier == true {
+				createVaultFlag = true
+				continue
+			}
+
+			// Not supported.
+			helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "StorageClass not supported:", rule, helper.CONFIG.EnableGlacier)
+			WriteErrorResponse(w, r, ErrInvalidStorageClass)
+			return
+		}
+
+		if createVaultFlag == true {
+			err = api.ObjectAPI.CreateVault(r.Context(), credential)
+			if err != nil {
+				helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "create vault failed", bucket)
+				WriteErrorResponse(w, r, ErrInternalError)
+				return
+			}
+
+			// Create a hidden bucket for archive restore.
+			err = api.ObjectAPI.MakeBucket(r.Context(),
+				meta.HIDDEN_BUCKET_PREFIX+credential.UserId,
+				Acl{CannedAcl: ValidCannedAcl[CANNEDACL_PRIVATE]},
+				credential)
+			if err != nil && err != ErrBucketAlreadyOwnedByYou {
+				helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Create hidden bucket failed", err)
+				WriteErrorResponse(w, r, ErrInternalError)
+				return
+			}
+
+			helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "hidden bucket created", meta.HIDDEN_BUCKET_PREFIX+credential.UserId)
+		}
+	}
+
 	err = api.ObjectAPI.SetBucketLc(r.Context(), bucket, lc, credential)
 	if err != nil {
 		helper.ErrorIf(err, "Unable to set LC for bucket.")

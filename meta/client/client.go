@@ -47,6 +47,8 @@ type Client interface {
 	PutBucketToLifeCycle(ctx context.Context, lifeCycle LifeCycle) error
 	RemoveBucketFromLifeCycle(ctx context.Context, bucket *Bucket) error
 	ScanLifeCycle(ctx context.Context, limit int, marker string) (result ScanLifeCycleResult, err error)
+	ScanHiddenBuckets(ctx context.Context, limit int, marker string) (buckets []string, truncated bool, err error)
+
 	//user
 	GetUserBuckets(userId string) (buckets []string, err error)
 	AddBucketForUser(bucketName, userId string) (err error)
@@ -55,4 +57,13 @@ type Client interface {
 	PutObjectToGarbageCollection(object *Object, tx interface{}) error
 	ScanGarbageCollection(limit int, startRowKey string) ([]GarbageCollection, error)
 	RemoveGarbageCollection(garbage GarbageCollection) error
+	//glacier
+	UpdateObjectStorageClass(object *Object) error
+	PutArchive(object *Object, archiveId string) error
+	GetArchiveId(object *Object) (archiveId string, err error) 
+	UpdateArchiveJobIdAndExpire(Object *Object, jobId string, days int64) error
+	GetJobId(object *Object)(jobId string, err error)
+	DeleteArchive(object *Object) error
+	DeleteParts(object *Object, part *Part) error
+	GetExpireDays(object *Object) (days int64, err error)
 }

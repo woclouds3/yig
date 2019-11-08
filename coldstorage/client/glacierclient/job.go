@@ -6,16 +6,27 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/glacier"
-	. "github.com/journeymidnight/yig/coldstorage/client"
+	//. "github.com/journeymidnight/yig/coldstorage/client"
 	. "github.com/journeymidnight/yig/coldstorage/types/glaciertype"
 	. "github.com/journeymidnight/yig/error"
 )
 
 //To initiate a job of the specified type, which can be a select, an archival retrieval, or a vault retrieval.
-func (c GlacierClient) PostJob(accountid string, jobpara *glacier.JobParameters, vaultname string) (*string, error) {
+func (c GlacierClient) PostJob(accountid, vaultname, archiveid, snstopic, tier, outputbucket string) (string, error) {
 	input := &glacier.InitiateJobInput{
 		AccountId:     aws.String(accountid),
-		JobParameters: jobpara,
+		JobParameters: &glacier.JobParameters{
+			ArchiveId:	 aws.String(archiveid),
+			Description: aws.String(""),
+			SNSTopic:    aws.String(snstopic),
+			Tier:		 aws.String(tier),
+			Type:        aws.String("archive-retrieval"),
+			OutputLocation:	&glacier.OutputLocation{
+				S3:		&glacier.S3Location{
+					BucketName:	aws.String(outputbucket),
+				},
+			},
+		},
 		VaultName:     aws.String(vaultname),
 	}
 	result, err := c.Client.InitiateJob(input)
@@ -41,7 +52,7 @@ func (c GlacierClient) PostJob(accountid string, jobpara *glacier.JobParameters,
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
 	}
-	jobid := result.JobId
+	jobid := aws.StringValue(result.JobId)
 	return jobid, err
 }
 
@@ -72,8 +83,8 @@ func (c GlacierClient) GetJobStatus(accountid string, jobid string, vaultname st
 		}
 	}
 	jobstatus := &JobStatus{
-		Completed:  result.Completed,
-		StatusCode: result.StatusCode,
+		Completed:  aws.BoolValue(result.Completed),
+		StatusCode: aws.StringValue(result.StatusCode),
 	}
 	return jobstatus, err
 }

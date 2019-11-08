@@ -78,6 +78,12 @@ type Config struct {
 
 	// Message Bus
 	MsgBus MsgBusConfig `toml:"msg_bus"`
+
+	EnableGlacier        bool   `toml:"enable_glacier"`
+	GlacierHost          string `toml:"glacier_host"`
+	GlacierRegion        string `toml:"glacier_region"`
+	GlacierTier          string `toml:"glacier_tier"`
+	HiddenBucketLcThread int    `toml:"hidden_bucket_lc_thread"`
 }
 
 type PluginConfig struct {
@@ -209,6 +215,12 @@ func MarshalTOMLConfig() error {
 	CONFIG.MsgBus.RequestTimeoutMs = Ternary(c.MsgBus.RequestTimeoutMs == 0, 3000, c.MsgBus.RequestTimeoutMs).(int)
 	CONFIG.MsgBus.MessageTimeoutMs = Ternary(c.MsgBus.MessageTimeoutMs == 0, 5000, c.MsgBus.MessageTimeoutMs).(int)
 	CONFIG.MsgBus.SendMaxRetries = Ternary(c.MsgBus.SendMaxRetries == 0, 2, c.MsgBus.SendMaxRetries).(int)
+
+	CONFIG.EnableGlacier = c.EnableGlacier
+	CONFIG.GlacierHost = c.GlacierHost
+	CONFIG.GlacierRegion = c.GlacierRegion
+	CONFIG.GlacierTier = Ternary(c.GlacierTier == "", "Standard", c.GlacierTier).(string)
+	CONFIG.HiddenBucketLcThread = Ternary(c.HiddenBucketLcThread <= 0, 1, c.HiddenBucketLcThread).(int)
 
 	return nil
 }

@@ -588,6 +588,13 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 	// See http://stackoverflow.com/questions/12186993
 	// for how to calculate multipart Etag
 
+	// Get oid for the whole object. It's used for Glacier only by now.
+	cephCluster, err := yig.GetClusterByFsName(multipart.Metadata.Location)
+	if err != nil {
+		return
+	}
+	oid := cephCluster.GetUniqUploadName()
+
 	// Add to objects table
 	contentType := multipart.Metadata.ContentType
 	object := &meta.Object{
@@ -609,6 +616,7 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 		CustomAttributes: multipart.Metadata.Attrs,
 		Type:             meta.ObjectTypeMultipart,
 		StorageClass:     multipart.Metadata.StorageClass,
+		ObjectId:         oid,
 	}
 
 	var nullVerNum uint64

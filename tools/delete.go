@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
-	"github.com/journeymidnight/yig/helper"
-	"github.com/journeymidnight/yig/log"
-	"github.com/journeymidnight/yig/meta"
-	"github.com/journeymidnight/yig/meta/types"
-	"github.com/journeymidnight/yig/storage"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/journeymidnight/yig/helper"
+	"github.com/journeymidnight/yig/iam"
+	"github.com/journeymidnight/yig/log"
+	"github.com/journeymidnight/yig/meta/types"
+	"github.com/journeymidnight/yig/mods"
+	"github.com/journeymidnight/yig/redis"
+	"github.com/journeymidnight/yig/storage"
 )
 
 const (
@@ -43,37 +46,52 @@ func deleteFromCeph(index int) {
 		)
 		garbage := <-gcTaskQ
 		gcWaitgroup.Add(1)
-		if len(garbage.Parts) == 0 {
-			err = yigs[index].DataStorage[garbage.Location].
-				Remove(garbage.Pool, garbage.ObjectId)
-			if err != nil {
-				if strings.Contains(err.Error(), "ret=-2") {
-					helper.Logger.Println(5, "failed delete", garbage.BucketName, ":", garbage.ObjectName, ":",
-						garbage.Location, ":", garbage.Pool, ":", garbage.ObjectId, " error:", err)
-					goto release
-				}
-				helper.Logger.Printf(2, "failed to delete obj %s in bucket %s with objid: %s from pool %s, err: %v", garbage.ObjectName, garbage.BucketName, garbage.ObjectId, garbage.Pool, err)
-				gcWaitgroup.Done()
-				continue
-			} else {
-				helper.Logger.Println(5, "success delete", garbage.BucketName, ":", garbage.ObjectName, ":",
-					garbage.Location, ":", garbage.Pool, ":", garbage.ObjectId)
-			}
-		} else {
-			for _, p = range garbage.Parts {
+		if garbage.StorageClass == types.ObjectStorageClassStandard {
+			// Ceph
+			if len(garbage.Parts) == 0 {
 				err = yigs[index].DataStorage[garbage.Location].
-					Remove(garbage.Pool, p.ObjectId)
+					Remove(garbage.Pool, garbage.ObjectId)
 				if err != nil {
 					if strings.Contains(err.Error(), "ret=-2") {
-						helper.Logger.Println(5, "failed delete part", garbage.Location, ":", garbage.Pool, ":", p.ObjectId, " error:", err)
+						helper.Logger.Println(5, "failed delete", garbage.BucketName, ":", garbage.ObjectName, ":",
+							garbage.Location, ":", garbage.Pool, ":", garbage.ObjectId, " error:", err)
 						goto release
 					}
-					helper.Logger.Printf(2, "failed to delete part %s with objid: %s from pool %s, err: %v", garbage.Location, garbage.ObjectId, garbage.Pool, err)
+					helper.Logger.Printf(2, "failed to delete obj %s in bucket %s with objid: %s from pool %s, err: %v", garbage.ObjectName, garbage.BucketName, garbage.ObjectId, garbage.Pool, err)
 					gcWaitgroup.Done()
 					continue
 				} else {
-					helper.Logger.Println(5, "success delete part", garbage.Location, ":", garbage.Pool, ":", p.ObjectId)
+					helper.Logger.Println(5, "success delete", garbage.BucketName, ":", garbage.ObjectName, ":",
+						garbage.Location, ":", garbage.Pool, ":", garbage.ObjectId)
 				}
+			} else {
+				for _, p = range garbage.Parts {
+					err = yigs[index].DataStorage[garbage.Location].
+						Remove(garbage.Pool, p.ObjectId)
+					if err != nil {
+						if strings.Contains(err.Error(), "ret=-2") {
+							helper.Logger.Println(5, "failed delete part", garbage.Location, ":", garbage.Pool, ":", p.ObjectId, " error:", err)
+							goto release
+						}
+						helper.Logger.Printf(2, "failed to delete part %s with objid: %s from pool %s, err: %v", garbage.Location, garbage.ObjectId, garbage.Pool, err)
+						gcWaitgroup.Done()
+						continue
+					} else {
+						helper.Logger.Println(5, "success delete part", garbage.Location, ":", garbage.Pool, ":", p.ObjectId)
+					}
+				}
+			}
+		} else if helper.CONFIG.EnableGlacier && garbage.StorageClass == types.ObjectStorageClassGlacier {
+			// Remove Archive in Glacier. Big file should be the same as small file.
+			err = yigs[index].DeleteObjectFromGlacier(nil, garbage.BucketName, garbage.ObjectName, garbage.ObjectId, garbage.OwnerId)
+			// TODO, how to handle delete fail in glacier?
+			if err != nil {
+				helper.Logger.Println(5, "failed delete from Glacier", err, ":", garbage.BucketName, ":", garbage.ObjectName, ":",
+					garbage.ObjectId, ":", garbage.OwnerId, ":")
+				//continue
+			} else {
+				helper.Logger.Println(5, "success delete from Glacier", garbage.BucketName, ":", garbage.ObjectName, ":",
+					garbage.ObjectId, ":", garbage.OwnerId, ":")
 			}
 		}
 	release:
@@ -144,10 +162,22 @@ func main() {
 
 	numOfWorkers := helper.CONFIG.GcThread
 	yigs = make([]*storage.YigStorage, helper.CONFIG.GcThread+1)
-	yigs[0] = storage.New(logger, int(meta.NoCache), false, helper.CONFIG.CephConfigPattern)
+
+	if helper.CONFIG.MetaCacheType > 0 || helper.CONFIG.EnableDataCache {
+		redis.Initialize()
+		defer redis.Close()
+	}
+	yigs[0] = storage.New(logger, helper.CONFIG.MetaCacheType, helper.CONFIG.EnableDataCache, helper.CONFIG.CephConfigPattern)
+
+	// Glacier requires ak/sk, use this to initialize iam plugin in delete process.
+	if helper.CONFIG.EnableGlacier {
+		allPluginMap := mods.InitialPlugins()
+		iam.InitializeIamClient(allPluginMap)
+	}
+
 	helper.Logger.Println(5, "start gc thread:", numOfWorkers)
 	for i := 0; i < numOfWorkers; i++ {
-		yigs[i+1] = storage.New(logger, int(meta.NoCache), false, helper.CONFIG.CephConfigPattern)
+		yigs[i+1] = storage.New(logger, helper.CONFIG.MetaCacheType, helper.CONFIG.EnableDataCache, helper.CONFIG.CephConfigPattern)
 		go deleteFromCeph(i + 1)
 	}
 	go removeDeleted()

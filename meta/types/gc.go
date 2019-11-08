@@ -18,6 +18,8 @@ type GarbageCollection struct {
 	MTime      time.Time // last modify time of status
 	Parts      map[int]*Part
 	TriedTimes int
+	StorageClass StorageClass
+	OwnerId		string
 }
 
 func (gc GarbageCollection) GetValues() (values map[string]map[string][]byte, err error) {

@@ -29,6 +29,7 @@ replace (
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/Sirupsen/logrus v0.0.0-20170822132746-89742aefa4b2 // indirect
+	github.com/aws/aws-sdk-go v1.25.32
 	github.com/cannium/gohbase v0.0.0-20170302080057-636e2cfdbc29
 	github.com/cep21/circuit v0.0.0-20181030180945-e893c027dc21
 	github.com/confluentinc/confluent-kafka-go v1.0.0 //indirect

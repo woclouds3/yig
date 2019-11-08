@@ -4,12 +4,13 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	. "github.com/journeymidnight/yig/error"
-	. "github.com/journeymidnight/yig/meta/types"
-	"github.com/xxtea/xxtea-go/xxtea"
 	"math"
 	"strconv"
 	"time"
+
+	. "github.com/journeymidnight/yig/error"
+	. "github.com/journeymidnight/yig/meta/types"
+	"github.com/xxtea/xxtea-go/xxtea"
 )
 
 func (t *TidbClient) GetObject(bucketName, objectName, version string) (object *Object, err error) {
@@ -211,5 +212,77 @@ func getParts(bucketName, objectName string, version uint64, cli *sql.DB) (parts
 		)
 		parts[p.PartNumber] = p
 	}
+	return
+}
+
+func (t *TidbClient) UpdateObjectStorageClass(object *Object) error {
+	sql, args := object.GetUpdateStorageClassSql()
+	_, err := t.Client.Exec(sql, args...)
+
+	return err
+}
+
+func (t *TidbClient) PutArchive(object *Object, archiveId string) error {
+	sql, args := object.GetCreateArchiveSql(archiveId)
+	_, err := t.Client.Exec(sql, args...)
+
+	return err
+}
+
+func (t *TidbClient) GetArchiveId(object *Object) (archiveId string, err error) {
+	sqltext := "select archiveid from archives where bucketname=? and objectname=? and objectid=? limit 1;"
+	row := t.Client.QueryRow(sqltext, object.BucketName, object.Name, object.ObjectId)
+
+	err = row.Scan(&archiveId)
+	if err != nil {
+		return "", err
+	}
+
+	return
+}
+
+func (t *TidbClient) UpdateArchiveJobIdAndExpire(object *Object, jobId string, days int64) error {
+	sql, args := object.GetUpdateArchiveJobIdSql(jobId, days)
+	_, err := t.Client.Exec(sql, args...)
+
+	return err
+}
+
+func (t *TidbClient) GetJobId(object *Object) (jobId string, err error) {
+	sqltext := "select jobid from archives where bucketname=? and objectname=? and objectid=? limit 1"
+	row := t.Client.QueryRow(sqltext, object.BucketName, object.Name, object.ObjectId)
+
+	err = row.Scan(&jobId)
+	if err != nil {
+		return "", err
+	}
+
+	return
+}
+
+func (t *TidbClient) DeleteArchive(object *Object) error {
+	sqltext := "delete from archives where bucketname=? and objectname=? and objectid=?"
+	_, err := t.Client.Exec(sqltext, object.BucketName, object.Name, object.ObjectId)
+
+	return err
+}
+
+func (t *TidbClient) DeleteParts(object *Object, part *Part) error {
+	sqltext := "delete from objectpart where bucketname=? and objectname=? and objectid=?"
+	_, err := t.Client.Exec(sqltext, object.BucketName, object.Name, part.ObjectId)
+	
+	return err
+}
+
+// TODO only archiveid is available here. But there is no index with archiveid.
+func (t *TidbClient) GetExpireDays(object *Object) (days int64, err error) {
+	sqltext := "select expiredays from archives where archiveid=? limit 1"
+	row := t.Client.QueryRow(sqltext, object.Name)
+
+	err = row.Scan(&days)
+	if err != nil {
+		return int64(0), err
+	}
+
 	return
 }

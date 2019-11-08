@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/journeymidnight/yig/api/datatype"
+	glacier "github.com/journeymidnight/yig/coldstorage/client"
 	"github.com/journeymidnight/yig/crypto"
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
@@ -76,6 +77,11 @@ func New(logger *log.Logger, metaCacheType int, enableDataCache bool, CephConfig
 	if enableDataCache {
 		initializeMetaSyncWorker(&yig)
 	}
+
+	if helper.CONFIG.EnableGlacier {
+		glacier.InitiateColdstorageClient(logger)
+	}
+
 	return &yig
 }
 

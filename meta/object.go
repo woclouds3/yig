@@ -204,6 +204,34 @@ func (m *Meta) AppendObject(object *Object, isExist bool) error {
 	return m.Client.UpdateAppendObject(object)
 }
 
+func (m *Meta) UpdateObjectStorageClass(object *Object) error {
+	return m.Client.UpdateObjectStorageClass(object)
+}
+func (m *Meta) PutArchive(object *Object, archiveId string) error {
+	return m.Client.PutArchive(object, archiveId)
+}
+func (m *Meta) GetArchiveId(object *Object) (archiveId string, err error) {
+	return m.Client.GetArchiveId(object)
+}
+func (m *Meta) UpdateArchiveJobIdAndExpire(object *Object, jobId string, days int64) error {
+	return m.Client.UpdateArchiveJobIdAndExpire(object, jobId, days)
+}
+
+func (m *Meta) GetJobId(object *Object) (jobId string, err error) {
+	return m.Client.GetJobId(object)
+}
+
+func (m *Meta) DeleteArchive(object *Object) (err error) {
+	return m.Client.DeleteArchive(object)
+}
+
+func (m *Meta) DeleteParts(object *Object, part *Part) error {
+	return m.Client.DeleteParts(object, part)
+}
+
+func (m *Meta) GetExpireDays(object *Object) (days int64, err error) {
+	return m.Client.GetExpireDays(object)
+}
 //func (m *Meta) DeleteObjectEntry(object *Object) error {
 //	err := m.Client.DeleteObject(object, nil)
 //	return err

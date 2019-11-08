@@ -1,5 +1,5 @@
 package glaciertype
 
 type VaultInfo struct {
-	NumberOfArchives *int64
+	NumberOfArchives int64
 }

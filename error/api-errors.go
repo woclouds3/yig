@@ -155,6 +155,8 @@ const (
 	ErrRequestTimeout
 	ErrServiceUnavailable
 	ErrLimitExceeded
+	ErrRestoreAlreadyInProgress
+	ErrInvalidObjectState
 )
 
 // error code to APIError structure, these fields carry respective
@@ -690,6 +692,16 @@ var ErrorCodeResponse = map[ApiErrorCode]ApiErrorStruct{
 		AwsErrorCode:   "LimitExceededException",
 		Description:    "Either the request results in a vault or account limit being exceeded or a retrieval job would exceed the current data policy's retrieval rate limit.",
 		HttpStatusCode: http.StatusBadRequest,
+	},
+	ErrRestoreAlreadyInProgress: {
+		AwsErrorCode:	"RestoreAlreadyInProgress",
+		Description: 	"Object restore is already in progress.",
+		HttpStatusCode: http.StatusConflict,
+	},
+	ErrInvalidObjectState: {
+		AwsErrorCode:	"InvalidObjectState",
+		Description: 	"The operation is not valid for the current state of the object.",
+		HttpStatusCode: http.StatusForbidden,
 	},
 }
 

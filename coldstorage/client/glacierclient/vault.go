@@ -4,7 +4,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/glacier"
-	. "github.com/journeymidnight/yig/coldstorage/client"
+	//. "github.com/journeymidnight/yig/coldstorage/client"
 	. "github.com/journeymidnight/yig/coldstorage/types/glaciertype"
 	. "github.com/journeymidnight/yig/error"
 )
@@ -63,7 +63,7 @@ func (c GlacierClient) GetVaultInfo(accountid string, vaultname string) (*VaultI
 		}
 	}
 	vaultinfo := &VaultInfo{
-		NumberOfArchives: result.NumberOfArchives,
+		NumberOfArchives: aws.Int64Value(result.NumberOfArchives),
 	}
 	return vaultinfo, err
 }
