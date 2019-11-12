@@ -29,4 +29,12 @@ type Client interface {
 	PostJob(accountid string, jobpara *glacier.JobParameters, vaultname string) (*string, error)
 	GetJobStatus(accountid string, jobid string, vaultname string) (*JobStatus, error)
 	GetJobOutput(accountid string, jobid string, vaultname string) (io.ReadCloser, error)
+
+	//multipart
+	CreateMultipart(accountid, partsize, vaultname string) (*string, error)
+	PutArchivePart(accountid, uploadid, vaultname, partrange string, ioreadseeker io.ReadSeeker) error
+	CompleteMultipartUpload(accountid, uploadid, vaultname string) (*string, error)
+	GetMultipartFromVault(accountid, vaultname string) ([]*glacier.UploadListElement, error)
+	GetMultipartFromArchive(accountid, uploadid, vaultname string) ([]*glacier.PartListElement, error)
+	AbortMultipart(accountid, uploadid, vaultname string) error
 }
