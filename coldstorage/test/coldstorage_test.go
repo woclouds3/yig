@@ -3,10 +3,9 @@ package test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/ioutil"
-	"math"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/glacier"
-	. "github.com/journeymidnight/yig/coldstorage/client"
 	. "github.com/journeymidnight/yig/coldstorage/client/glacierclient"
 	. "github.com/journeymidnight/yig/coldstorage/types/glaciertype"
 )
@@ -35,85 +33,44 @@ type InventoryRetrieval struct {
 	ArchiveList   []Archive
 }
 
-func createSmallFile(content string, filename string) {
-	f, err := os.Create(filename)
-	if err != nil {
-		Logger.Println(5, "With error: ", err)
-	}
-	_, err = f.Write([]byte(content))
-	if err != nil {
-		Logger.Println(5, "With error: ", err)
-	}
+type ReadSeeker struct {
+	b        []byte
+	i        int64
+	prevRune int
 }
 
-func createBigFile(size int, filename string) {
-	f, err := os.Create(filename)
-	if err != nil {
-		Logger.Println(5, "With error: ", err)
+func (rs *ReadSeeker) Read(b []byte) (n int, err error) {
+	if rs.i >= int64(len(rs.b)) {
+		return 0, io.EOF
 	}
-	f, err = os.OpenFile(filename, os.O_CREATE|os.O_RDWR, os.ModeAppend|os.ModeSetuid)
-	if err != nil {
-		Logger.Println(5, "With error: ", err)
-	}
-	count := math.Ceil(float64(size) / 1000)
-	count_64 := int64(int(count))
-	var i int64
-	var length int
-	for i = 0; i < count_64; i++ {
-		if i == (count_64 - 1) {
-			length = int(int64(size) - (i)*1000)
-		} else {
-			length = 1000
-		}
-		_, err = f.WriteAt([]byte(strings.Repeat("A", length)), i*1000)
-		if err != nil {
-			Logger.Println(5, "With error: ", err)
-		}
-	}
+	rs.prevRune = -1
+	n = copy(b, rs.b[rs.i:])
+	rs.i += int64(n)
+	return
 }
 
-func splitBigFile(filename string, chunkSize int64) int {
-	fileInfo, err := os.Stat(filename)
-	if err != nil {
-		Logger.Println(5, "With error: ", err)
+func (rs *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	rs.prevRune = -1
+	var abs int64
+	switch whence {
+	case io.SeekStart:
+		abs = offset
+	case io.SeekCurrent:
+		abs = rs.i + offset
+	case io.SeekEnd:
+		abs = int64(len(rs.b)) + offset
+	default:
+		return 0, errors.New("strings.Reader.Seek: invalid whence")
 	}
-	num := int(math.Ceil(float64(fileInfo.Size()) / float64(chunkSize)))
-	fi, err := os.OpenFile(filename, os.O_RDONLY, os.ModePerm)
-	if err != nil {
-		Logger.Println(5, "With error: ", err)
+	if abs < 0 {
+		return 0, errors.New("strings.Reader.Seek: negative position")
 	}
-	b := make([]byte, chunkSize)
-	var i int64 = 1
-	for ; i <= int64(num); i++ {
-		_, err = fi.Seek((i-1)*(chunkSize), 0)
-		if err != nil {
-			Logger.Println(5, "With error: ", err)
-		}
-		if len(b) > int((fileInfo.Size() - (i-1)*chunkSize)) {
-			b = make([]byte, fileInfo.Size()-(i-1)*chunkSize)
-		}
-		_, err = fi.Read(b)
-		if err != nil {
-			Logger.Println(5, "With error: ", err)
-		}
-		f, err := os.OpenFile("./"+strconv.Itoa(int(i))+".txt", os.O_CREATE|os.O_WRONLY, os.ModePerm)
-		if err != nil {
-			Logger.Println(5, "With error: ", err)
-		}
-		_, err = f.Write(b)
-		if err != nil {
-			Logger.Println(5, "With error: ", err)
-		}
-		err = f.Close()
-		if err != nil {
-			Logger.Println(5, "With error: ", err)
-		}
-	}
-	err = fi.Close()
-	if err != nil {
-		Logger.Println(5, "With error: ", err)
-	}
-	return num
+	rs.i = abs
+	return abs, nil
+}
+
+func NewReadSeeker(b []byte) *ReadSeeker {
+	return &ReadSeeker{b, 0, -1}
 }
 
 func TestColdStorage(t *testing.T) {
@@ -127,12 +84,8 @@ func TestColdStorage(t *testing.T) {
 	}
 
 	content := "This file is used for cold storage single archive function test."
-	createSmallFile(content, "SmallFile.txt")
-	sf, err := os.Open("SmallFile.txt")
-	if err != nil {
-		t.Fatal("OpenSmallFile fail:", err)
-	}
-	archiveid, err := gcli.PutArchive("-", "VaultTest", sf)
+	ioreadseeker := aws.ReadSeekCloser(strings.NewReader(content))
+	archiveid, err := gcli.PutArchive("-", "VaultTest", ioreadseeker)
 	if err != nil {
 		t.Fatal("Upload archive fail:", err)
 	} else {
@@ -185,11 +138,6 @@ func TestColdStorage(t *testing.T) {
 		t.Fatal("Upload archive fail!")
 	}
 
-	err = os.Remove("SmallFile.txt")
-	if err != nil {
-		t.Fatal("DeleteSmallFile fail:", err)
-	}
-
 	uploadid, err := gcli.CreateMultipart("-", "8388608", "VaultTest")
 	if err != nil {
 		t.Fatal("CreateMultipart fail:", err)
@@ -197,36 +145,32 @@ func TestColdStorage(t *testing.T) {
 		t.Log("CreateMultipart success!")
 	}
 
-	var bytesize = 25690112
-	var chunkSize int64 = 8388608
-	createBigFile(bytesize, "BigFile.txt")
-	num := splitBigFile("BigFile.txt", chunkSize)
-	for i := 1; i <= num; i++ {
-		fi, err := os.Open("./" + strconv.Itoa(int(i)) + ".txt")
-		if err != nil {
-			t.Fatal("Open "+strconv.Itoa(int(i))+".txt fail:", err)
-		}
-		startpart := strconv.Itoa(8388608 * (i - 1))
+	for i := 0; i < 5; i++ {
+		var rs io.ReadSeeker
 		var endpart string
-		if i < num {
-			endpart = strconv.Itoa(8388608*i - 1)
+		var c = byte(i)
+		startpart := strconv.Itoa(8388608 * i)
+		if i < 4 {
+			frontBigArr := make([]byte, 8388608)
+			for j := 0; j < 8388608; j++ {
+				frontBigArr[j] = c
+			}
+			rs = NewReadSeeker(frontBigArr)
+			endpart = strconv.Itoa(8388608*(i+1) - 1)
 		} else {
-			endpart = strconv.Itoa(bytesize - 1)
+			lastBigArr := make([]byte, 4194304)
+			for j := 0; j < 4194304; j++ {
+				lastBigArr[j] = c
+			}
+			rs = NewReadSeeker(lastBigArr)
+			endpart = strconv.Itoa(37748735)
 		}
 		partrange := "bytes " + startpart + "-" + endpart + "/*"
-		err = gcli.PutArchivePart("-", *uploadid, "VaultTest", partrange, fi)
+		err = gcli.PutArchivePart("-", *uploadid, "VaultTest", partrange, rs)
 		if err != nil {
-			t.Fatal("Put"+strconv.Itoa(i)+"ArchivePart fail:", err)
+			t.Fatal("Put"+strconv.Itoa(i+1)+"ArchivePart fail:", err)
 		} else {
-			t.Log("Put" + strconv.Itoa(i) + "ArchivePart success!")
-		}
-		err = fi.Close()
-		if err != nil {
-			t.Fatal("Close "+strconv.Itoa(int(i))+".txt fail:", err)
-		}
-		err = os.Remove("./" + strconv.Itoa(int(i)) + ".txt")
-		if err != nil {
-			t.Fatal("Delete "+strconv.Itoa(int(i))+".txt fail:", err)
+			t.Log("Put" + strconv.Itoa(i+1) + "ArchivePart success!")
 		}
 	}
 
@@ -242,11 +186,6 @@ func TestColdStorage(t *testing.T) {
 		t.Fatal("CompleteMultipartUpload fail:", err)
 	} else {
 		t.Log("CompleteMultipartUpload success!")
-	}
-
-	err = os.Remove("BigFile.txt")
-	if err != nil {
-		t.Fatal("DeleteBigFile fail:", err)
 	}
 
 	_, err = gcli.GetMultipartFromVault("-", "VaultTest")

@@ -15,7 +15,7 @@ import (
 func (c GlacierClient) PutArchive(accountid, vaultname string, ioreadseeker io.ReadSeeker) (archiveid *string, err error) {
 	input := &glacier.UploadArchiveInput{
 		AccountId:          aws.String(accountid),
-		ArchiveDescription: aws.String("-"),
+		ArchiveDescription: aws.String(""),
 		Body:               ioreadseeker,
 		Checksum:           aws.String(""),
 		VaultName:          aws.String(vaultname),
