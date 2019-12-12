@@ -53,6 +53,7 @@ The only implementation difference is in delete daemon which calls different API
 There is no problem if multiple lc daemons delete expired objects simutanously.
 But when multiple lc daemons transit objects to Glacier without any synchronization mechanism, the same object may be saved in Glacier for more than once (unwanted).
 Further work is required on multiple lc transition.
+* AppendObject is not supported on buckets configured with Transition rules to keep data integrity.  
 * SSE objects will not be transited to Glacier.  
 * Vaults are not deleted.  
 * Current Glacier backend (ehualu) support smallest single part 8M, while AWS Glacier defines smallest part 1M.
