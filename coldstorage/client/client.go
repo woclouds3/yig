@@ -17,10 +17,6 @@ type ClientAPI interface {
 	//archives
 	PutArchive(accountid, vaultname string, ioReader io.Reader) (string, error)
 	DeleteArchive(accountid string, archiveid string, vaultname string) error
-	CreateMultipart(accountid, partsize, vaultname string) (string, error)
-	PutArchivePart(accountid, uploadid, vaultname, partrange string, ioReader io.Reader) error
-	CompleteMultipartUpload(accountid, uploadid, vaultname string) (string, error)
-	DeleteMultipart(accountid, uploadid, vaultname string) error
 
 	//vaults
 	CreateVault(accountid string, vaultname string) error
@@ -31,6 +27,14 @@ type ClientAPI interface {
 	PostJob(accountid, vaultname, archiveid, snstopic, tier, outputbucket string) (string, error)
 	GetJobStatus(accountid string, jobid string, vaultname string) (*JobStatus, error)
 	GetJobOutput(accountid string, jobid string, vaultname string) (io.ReadCloser, error)
+
+	//multipart
+	CreateMultipart(accountid, partsize, vaultname string) (string, error)
+	PutArchivePart(accountid, uploadid, vaultname, partrange string, ioReader io.Reader) error
+	CompleteMultipartUpload(accountid, uploadid, vaultname string) (string, error)
+	// GetMultipartFromVault(accountid, vaultname string) ([]*glacier.UploadListElement, error)
+	// GetMultipartFromArchive(accountid, uploadid, vaultname string) ([]*glacier.PartListElement, error)
+	DeleteMultipart(accountid, uploadid, vaultname string) error
 }
 
 type Client struct {

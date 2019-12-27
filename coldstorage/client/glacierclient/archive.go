@@ -39,6 +39,7 @@ func (c GlacierClient) PutArchive(accountid, vaultname string, ioReader io.Reade
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
+
 		archiveId = ""
 	} else {
 		archiveId = aws.StringValue(result.ArchiveId)
@@ -101,6 +102,7 @@ func (c GlacierClient) CreateMultipart(accountid, partsize, vaultname string) (s
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
+
 		uploadId = ""
 	} else {
 		uploadId = aws.StringValue(result.UploadId)
@@ -168,6 +170,7 @@ func (c GlacierClient) CompleteMultipartUpload(accountid, uploadid, vaultname st
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
+
 		archiveId = ""
 	} else {
 		archiveId = aws.StringValue(result.ArchiveId)
@@ -200,6 +203,7 @@ func (c GlacierClient) GetMultipartFromVault(accountid, vaultname string) ([]*gl
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
+		return nil, err
 	}
 	uploadlist := result.UploadsList
 	return uploadlist, err
@@ -230,6 +234,7 @@ func (c GlacierClient) GetMultipartFromArchive(accountid, uploadid, vaultname st
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
+		return nil, err
 	}
 	parts := result.Parts
 	return parts, err
