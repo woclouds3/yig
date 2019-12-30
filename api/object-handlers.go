@@ -990,17 +990,16 @@ func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.
 
 
 	// Append is not supported with Archiving buckets.
-	lc, err := api.ObjectAPI.GetBucketLc(r.Context(), bucketName, credential)
-	if err != nil {
-		helper.ErrorIf(err, "Failed to get bucket lc policy for bucket", bucketName)
-		WriteErrorResponse(w, r, err)
-		return
-	}
-	for _, rule := range lc.Rule {
-		if rule.TransitionStorageClass == "GLACIER" {
-			helper.Debugln("[", RequestIdFromContext(r.Context()), "]", bucketName, "Append is not supported with Lc rule", rule)
-			WriteErrorResponse(w, r, ErrObjectNotAppendable)
-			return
+	if helper.CONFIG.EnableGlacier == true {
+		lc, err := api.ObjectAPI.GetBucketLc(r.Context(), bucketName, credential)
+		if err == nil {
+			for _, rule := range lc.Rule {
+				if rule.TransitionStorageClass == "GLACIER" {
+					helper.Debugln("[", RequestIdFromContext(r.Context()), "]", bucketName, "Append is not supported with Lc rule", rule)
+					WriteErrorResponse(w, r, ErrObjectNotAppendable)
+					return
+				}
+			}
 		}
 	}
 
