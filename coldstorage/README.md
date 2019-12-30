@@ -1,14 +1,7 @@
 # Storage Transition to Glacier
 ## Dependencies
 It requires yig-iam fix in https://github.com/wuxingyi/yig-iam/pull/1    
-And yig.toml should contains   
-```
-enable_glacier = true
-glacier_host = "10.0.0.1:9100"
-glacier_region = "us-east-1"
-glacier_tier = "Standard"
-hidden_bucket_lc_thread = 5 
-```
+
 ## Modules
 ![arch](https://github.com/woclouds3/yig/blob/glacier/doc/picture/glacier_modules.png)  
 
@@ -20,6 +13,7 @@ enable_glacier = true
 glacier_host = "10.0.0.1:9100"
 glacier_region = "us-east-1"
 glacier_tier = "Standard"
+hidden_bucket_lc_thread = 5 
 ```
 * storage/glacier.go and storage/glacier-multipart.go
 ```
