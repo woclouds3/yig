@@ -34,7 +34,7 @@ Vault is created per user when yig receives a lifecycle configuration with trans
 Vault won't be deleted as there is no good time point. And as long as a Vault exist, user can find the disks (from ehualu).  
 Please find the implementation in storage/glacier.go [CreateVault()].   
   
-* Storage Transition (from Ceph to Glacier)
+* Storage Transition (from Ceph to Glacier) .  
 LC daemon will periodically check lifecycle configuration and delete expired objects.  
 Now it also transit expired objects to Glacier.  
 It's designed that, if a bucket is configured with transition to Glacier and yig is configured with Glacier enabled, **objects in it are not appendable**, to avoid possible data loss in simutanous operation to the same object.
