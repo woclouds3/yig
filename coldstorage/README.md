@@ -30,7 +30,7 @@ DEFAULT_LC_QUEUE_LENGTH            = 100
 
 ## Work Flow
 * Vault creation  
-Vault is created per bucket when yig receives a lifecycle configuration with transition for the first time.  
+Vault is created per user when yig receives a lifecycle configuration with transition for the first time.  
 Vault won't be deleted as there is no good time point. And as long as a Vault exist, user can find the disks (from ehualu).  
 Please find the implementation in storage/glacier.go [CreateVault()].   
   
@@ -53,7 +53,9 @@ Please find the implementation in storage/glacier-multipart.go which is called b
 After an object archived, the user must restore it before get it which may take some time.  
 The user can indicate the restored days in the request.  
 LC will delete the restored copy after that.  
-**In our design, a "hidden" bucket will be created for each user to save the temperary restored copy. Glacier backend (ehualu) will PUT the object to the hidden bucket as indicated by yig in Job initiation request. It'll take some time.**   
+**In our design, a "hidden" bucket will be created for each user to save the temperary restored copy named by archive id. Glacier backend (ehualu) will PUT the object to the hidden bucket as indicated by yig in Job initiation request. It'll take some time.**   
+The hidden bucket will be named as "archive-restore-"+user id, like "archive-restore-p-5F93Z57RD565MBT4".
+The archive id is generated in Glacier (ehualu), like "s-0ea702662991423b9544ec4c64a79491" for small objects and "m-0cb4fec1b945440caaeccf6adce01ec9" for multipart objects.
 Please find the restore implementation in api/object-handler.go [RestoreObjectHandler()] and storage/glacier.go [RestoreObjectFromGlacier()].   
 After restore, the restored object copy in hidden bucket will be returned when GET is requested.  
 Please find the GET implementation in api/object-handler.go [GetObjectHandler()].  
@@ -77,6 +79,7 @@ Further work is required on multiple lc transition.
 * Current Glacier backend (ehualu) support max archive 4T, while AWS S3 max object 5T.  
 * Current Glacier multipart is implemented that if len(object.Parts) == 0, the whole object will be transited to Glacier as a single archive even if it's big. Further work is required if it should be transited to Glacier in parts.     
 * After transition to Glacier, objects in Ceph will be deleted. If it fails in DB operation, the object can't be moved to gc table and deleted after that. There is no good point to try it again.   
+* **Current hidden bucket only hide a bucket in "ListBuckets" request if it starts with "archive-restore-" as defined in meta/types/bucket.go[HIDDEN_BUCKET_PREFIX].**. You can still GET/PUT/LIST/... objects from / to a hidden bucket.   
 * It requires more work in serialization for LifecycleRule  
 If a user put and get a lifecycle configuration as follows, he'll find the output seems not completely the same as saved.
 It orients from LcRule definition in api/datatype/lifecycle.go .  
