@@ -2,8 +2,8 @@
 ## Dependencies
 It requires yig-iam fix in https://github.com/wuxingyi/yig-iam/pull/1    
 
-## Modules
-![arch](https://github.com/woclouds3/yig/blob/glacier/doc/picture/glacier_modules.png)  
+## Modules    
+![arch](https://github.com/woclouds3/yig/blob/glacier/doc/picture/glacier_modules.png)    
 
 ## Configuration and Constants in Implementation
 Quick Facts in https://docs.aws.amazon.com/amazonglacier/latest/dev/uploading-archive-mpu.html  
@@ -76,9 +76,10 @@ Further work is required on multiple lc transition.
 * Current Glacier backend (ehualu) support smallest single part 8M, while AWS Glacier defines smallest part 1M.
 * Current Glacier backend (ehualu) support max archive 4T, while AWS S3 max object 5T.  
 * Current Glacier multipart is implemented that if len(object.Parts) == 0, the whole object will be transited to Glacier as a single archive even if it's big. Further work is required if it should be transited to Glacier in parts.     
+* After transition to Glacier, objects in Ceph will be deleted. If it fails in DB operation, the object can't be moved to gc table and deleted after that. There is no good point to try it again.   
 * It requires more work in serialization for LifecycleRule  
 If a user put and get a lifecycle configuration as follows, he'll find the output seems not completely the same as saved.
-It orients from LcRule definition in api/datatype/lifecycle.go .
+It orients from LcRule definition in api/datatype/lifecycle.go .  
 I don't find any easy way to eliminate the difference.
 ```
 cat lcfile.xml
