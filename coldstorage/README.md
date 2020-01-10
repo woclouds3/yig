@@ -55,7 +55,7 @@ The user can indicate the restored days in the request.
 LC will delete the restored copy after that.  
 **In our design, a "hidden" bucket will be created for each user to save the temperary restored copy named by archive id. Glacier backend (ehualu) will PUT the object to the hidden bucket as indicated by yig in Job initiation request. It'll take some time.**   
 The hidden bucket will be named as "archive-restore-"+user id, like "archive-restore-p-5F93Z57RD565MBT4".
-The archive id is generated in Glacier (ehualu), like "s-0ea702662991423b9544ec4c64a79491" for small objects and "m-0cb4fec1b945440caaeccf6adce01ec9" for multipart objects.
+The archive id is generated in Glacier (ehualu), like "s-0ea702662991423b9544ec4c64a79491" for small objects and "m-0cb4fec1b945440caaeccf6adce01ec9" for multipart objects.   
 Please find the restore implementation in api/object-handler.go [RestoreObjectHandler()] and storage/glacier.go [RestoreObjectFromGlacier()].   
 After restore, the restored object copy in hidden bucket will be returned when GET is requested.  
 Please find the GET implementation in api/object-handler.go [GetObjectHandler()].  
