@@ -412,20 +412,20 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 
 	// Check whether Glacier is supported.
 	// By default, we only support STANDARD.
-	if helper.CONFIG.EnableGlacier {
+	if helper.CONFIG.Glacier.EnableGlacier {
 		createVaultFlag := false
 		for _, rule := range lc.Rule {
 			if rule.TransitionStorageClass == "" || rule.TransitionStorageClass == "STANDARD" {
 				continue
 			}
 
-			if rule.TransitionStorageClass == "GLACIER" && helper.CONFIG.EnableGlacier == true {
+			if rule.TransitionStorageClass == "GLACIER" && helper.CONFIG.Glacier.EnableGlacier == true {
 				createVaultFlag = true
 				continue
 			}
 
 			// Not supported.
-			helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "StorageClass not supported:", rule, helper.CONFIG.EnableGlacier)
+			helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "StorageClass not supported:", rule, helper.CONFIG.Glacier.EnableGlacier)
 			WriteErrorResponse(w, r, ErrInvalidStorageClass)
 			return
 		}
@@ -433,7 +433,7 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 		if createVaultFlag == true {
 			err = api.ObjectAPI.CreateVault(r.Context(), credential)
 			if err != nil {
-				helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "create vault failed", bucket)
+				helper.Logger.Println(5, RequestIdFromContext(r.Context()), "]", "create vault failed", bucket)
 				WriteErrorResponse(w, r, ErrInternalError)
 				return
 			}
@@ -444,7 +444,7 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 				Acl{CannedAcl: ValidCannedAcl[CANNEDACL_PRIVATE]},
 				credential)
 			if err != nil && err != ErrBucketAlreadyOwnedByYou {
-				helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Create hidden bucket failed", err)
+				helper.Logger.Println(5, RequestIdFromContext(r.Context()), "]", "Create hidden bucket failed", err)
 				WriteErrorResponse(w, r, ErrInternalError)
 				return
 			}

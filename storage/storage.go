@@ -78,7 +78,7 @@ func New(logger *log.Logger, metaCacheType int, enableDataCache bool, CephConfig
 		initializeMetaSyncWorker(&yig)
 	}
 
-	if helper.CONFIG.EnableGlacier {
+	if helper.CONFIG.Glacier.EnableGlacier {
 		glacier.InitiateColdstorageClient(logger)
 	}
 

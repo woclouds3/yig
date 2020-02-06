@@ -1156,7 +1156,7 @@ func (yig *YigStorage) DeleteObject(ctx context.Context, bucketName string, obje
 		}
 	} // TODO policy and fancy ACL
 
-	if helper.CONFIG.EnableGlacier {
+	if helper.CONFIG.Glacier.EnableGlacier {
 		object, err := yig.GetObjectInfo(ctx, bucketName, objectName, version, credential)
 		if err == nil && object.StorageClass == meta.ObjectStorageClassGlacier && object.SseType == "" {
 			// Remove restored object if any. Must done before delete object.

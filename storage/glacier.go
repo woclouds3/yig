@@ -27,13 +27,13 @@ const (
 // A Vault named "-" for each uid. No meta data saved. Buckets under the same uid share the same Vault "-".
 func (yig *YigStorage) CreateVault(ctx context.Context, credential common.Credential) (err error) {
 	reqId := helper.RequestIdFromContext(ctx)
-	if helper.CONFIG.EnableGlacier == false {
+	if helper.CONFIG.Glacier.EnableGlacier == false {
 		helper.Logger.Printf(10, "[ %s ] Glacier not enabled", reqId)
 		return ErrInternalError
 	}
 
-	glacierClient := glacier.NewClient(helper.CONFIG.GlacierHost,
-		helper.CONFIG.GlacierRegion,
+	glacierClient := glacier.NewClient(helper.CONFIG.Glacier.GlacierHost,
+		helper.CONFIG.Glacier.GlacierRegion,
 		credential.AccessKeyID,
 		credential.SecretAccessKey)
 
@@ -44,7 +44,7 @@ func (yig *YigStorage) CreateVault(ctx context.Context, credential common.Creden
 		err = glacierClient.GlacierAPI.CreateVault(credential.UserId, DEFAULT_VAULT_NAME)
 		if err != nil {
 			helper.Logger.Printf(5, "[ %s ] CreateBucketVaultInGlacier failed uid %s Glacier %s %s err %v",
-				reqId, credential.UserId, helper.CONFIG.GlacierHost, helper.CONFIG.GlacierRegion, err)
+				reqId, credential.UserId, helper.CONFIG.Glacier.GlacierHost, helper.CONFIG.Glacier.GlacierRegion, err)
 			return
 		}
 	}
@@ -57,13 +57,13 @@ func (yig *YigStorage) CreateVault(ctx context.Context, credential common.Creden
 // TODO. Now we don't delete a Vault.
 func (yig *YigStorage) DeleteVault(ctx context.Context, credential common.Credential) (err error) {
 	reqId := helper.RequestIdFromContext(ctx)
-	if helper.CONFIG.EnableGlacier == false {
+	if helper.CONFIG.Glacier.EnableGlacier == false {
 		helper.Logger.Printf(10, "[ %s ] Glacier not enabled", reqId)
 		return ErrInternalError
 	}
 
-	glacierClient := glacier.NewClient(helper.CONFIG.GlacierHost,
-		helper.CONFIG.GlacierRegion,
+	glacierClient := glacier.NewClient(helper.CONFIG.Glacier.GlacierHost,
+		helper.CONFIG.Glacier.GlacierRegion,
 		credential.AccessKeyID,
 		credential.SecretAccessKey)
 
@@ -95,7 +95,7 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 	helper.Logger.Printf(10, "[ %s ] TransitObjectToGlacier bucket: %s object: %s",
 		reqId, bucket.Name, object.Name)
 
-	if helper.CONFIG.EnableGlacier == false {
+	if helper.CONFIG.Glacier.EnableGlacier == false {
 		helper.Logger.Printf(10, "[ %s ] Glacier not enabled", reqId)
 		return ErrInternalError
 	}
@@ -112,8 +112,8 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 	}
 	credential := credentials[0]
 
-	glacierClient := glacier.NewClient(helper.CONFIG.GlacierHost,
-		helper.CONFIG.GlacierRegion,
+	glacierClient := glacier.NewClient(helper.CONFIG.Glacier.GlacierHost,
+		helper.CONFIG.Glacier.GlacierRegion,
 		credential.AccessKeyID,
 		credential.SecretAccessKey)
 
@@ -124,7 +124,7 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 	}
 
 	var archiveId string
-	
+
 	if len(object.Parts) == 0 {
 		// small file
 		ioReadCloser, err := cephCluster.getReader(object.Pool, object.ObjectId, 0, object.Size)
@@ -142,7 +142,7 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 			return err
 		}
 	} else {
-		helper.Logger.Printf(20, "[ %s ] TransitObjectToGlacier multipart bucket: %s object: %s size: %d partNum %d", 
+		helper.Logger.Printf(20, "[ %s ] TransitObjectToGlacier multipart bucket: %s object: %s size: %d partNum %d",
 			reqId, bucket.Name, object.Name, object.Size, len(object.Parts))
 
 		// https://docs.aws.amazon.com/amazonglacier/latest/dev/uploading-archive-mpu.html
@@ -163,8 +163,8 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 
 		// A big object will be saved as a single archive. Initiate a job for multipart upload.
 		uploadId, err := glacierClient.GlacierAPI.CreateMultipart(credential.UserId,
-																strconv.FormatInt(DEFAULT_PART_SIZE, 10),
-																DEFAULT_VAULT_NAME)
+			strconv.FormatInt(DEFAULT_PART_SIZE, 10),
+			DEFAULT_VAULT_NAME)
 		if err != nil {
 			helper.Logger.Printf(5, "[ %s ] CreateMultipart failed for user %s bucket %s object %s size %d partSize %d",
 				reqId, credential.UserId, object.BucketName, object.Name, object.Size, partBuilder.glacierPartSize)
@@ -179,18 +179,18 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 			}
 
 			contentRange, err := getContentRange(partIndex, partBuilder.glacierPartSize, object.Size)
-			if err != nil  {
+			if err != nil {
 				helper.Logger.Printf(5, "[ %s ] getContentRange failed %d %d", reqId, partIndex, partBuilder.glacierPartSize)
 				glacierClient.GlacierAPI.DeleteMultipart(credential.UserId, uploadId, DEFAULT_VAULT_NAME)
 				return ErrInternalError
 			}
 
 			partReader := partBuilder.getReader()
-			err = glacierClient.GlacierAPI.PutArchivePart(credential.UserId, 
-														uploadId, 
-														DEFAULT_VAULT_NAME, 
-														contentRange, 
-														partReader)
+			err = glacierClient.GlacierAPI.PutArchivePart(credential.UserId,
+				uploadId,
+				DEFAULT_VAULT_NAME,
+				contentRange,
+				partReader)
 			partReader.Close()
 			if err != nil {
 				helper.Logger.Printf(5, "[ %s ] PutArchivePart failed %d %d", reqId, partBuilder.glacierPartSize, partIndex)
@@ -207,14 +207,14 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 	}
 
 	helper.Logger.Printf(10, "[ %s ] TransitObjectToGlacier Succeeded bucket: %s object: %s id %s / %s archiveId %s",
-							reqId, bucket.Name, object.Name, object.ObjectId, object.VersionId, archiveId)
+		reqId, bucket.Name, object.Name, object.ObjectId, object.VersionId, archiveId)
 
 	// TODO, check checksum for object.
 
 	// Add bucket name, object id, archiveId into DB.
 	err = yig.MetaStorage.PutArchive(object, archiveId)
 	if err != nil {
-		helper.Logger.Printf(2, "[ %s ] PutArchive to DB failed archiveId %s bucket %s object %s id %s / %s !", 
+		helper.Logger.Printf(2, "[ %s ] PutArchive to DB failed archiveId %s bucket %s object %s id %s / %s !",
 			reqId, archiveId, bucket.Name, object.Name, object.ObjectId, object.VersionId)
 		return err
 	}
@@ -253,9 +253,6 @@ func (yig *YigStorage) TransitObjectToGlacier(ctx context.Context, bucket *meta.
 			helper.Logger.Println(20, "[  ] Delete Parts in DB", object.BucketName, object.Name, part.ObjectId, err)
 		}
 	}
-/*  */
-
-	// TODO update object id in db. Now we keep it for future debug.
 
 	return nil
 }
@@ -264,7 +261,7 @@ func (yig *YigStorage) RestoreObjectFromGlacier(ctx context.Context, bucketName,
 	reqId := helper.RequestIdFromContext(ctx)
 	helper.Logger.Printf(20, "[ %s ] RestoreObjectFromGlacier bucket: %s object: %s version %s days %d", reqId, bucketName, objectName, version, restoreDays)
 
-	if helper.CONFIG.EnableGlacier == false {
+	if helper.CONFIG.Glacier.EnableGlacier == false {
 		helper.Logger.Printf(10, "[ %s ] Glacier not enabled", reqId)
 		return 0, ErrInternalError
 	}
@@ -276,16 +273,16 @@ func (yig *YigStorage) RestoreObjectFromGlacier(ctx context.Context, bucketName,
 	}
 
 	// If Archive already restored, expand expire days and return 200.
-	restoredObject, err := yig.MetaStorage.GetObject(ctx, meta.HIDDEN_BUCKET_PREFIX + credential.UserId, yig.GetRestoredObjectName(ctx, object), true)
+	restoredObject, err := yig.MetaStorage.GetObject(ctx, meta.HIDDEN_BUCKET_PREFIX+credential.UserId, yig.GetRestoredObjectName(ctx, object), true)
 	if err == nil {
-		err = yig.MetaStorage.UpdateArchiveJobIdAndExpire(object, "", int64(time.Since(restoredObject.LastModifiedTime).Hours() / 24) + restoreDays)
+		err = yig.MetaStorage.UpdateArchiveJobIdAndExpire(object, "", int64(time.Since(restoredObject.LastModifiedTime).Hours()/24)+restoreDays)
 		if err != nil {
 			helper.Logger.Printf(5, "[ %s ] Update days in DB failed for bucket %s object %s %s restoreDays %d", reqId, bucketName, objectName, object.ObjectId, restoreDays)
 			return 0, ErrInternalError
 		}
 
-		helper.Logger.Printf(20, "[ %s ] RestoreObjectFromGlacier only update restore days %d for bucket: %s object: %s version %s", 
-								reqId, int64(time.Since(restoredObject.LastModifiedTime).Hours() / 24) + restoreDays, bucketName, objectName, version)
+		helper.Logger.Printf(20, "[ %s ] RestoreObjectFromGlacier only update restore days %d for bucket: %s object: %s version %s",
+			reqId, int64(time.Since(restoredObject.LastModifiedTime).Hours()/24)+restoreDays, bucketName, objectName, version)
 
 		return http.StatusOK, nil
 	}
@@ -298,12 +295,12 @@ func (yig *YigStorage) RestoreObjectFromGlacier(ctx context.Context, bucketName,
 
 	helper.Logger.Printf(20, "[ %s ] RestoreObjectFromGlacier Initiate a new job for archiveId %s", reqId, archiveId)
 
-	glacierClient := glacier.NewClient(helper.CONFIG.GlacierHost,
-		helper.CONFIG.GlacierRegion,
+	glacierClient := glacier.NewClient(helper.CONFIG.Glacier.GlacierHost,
+		helper.CONFIG.Glacier.GlacierRegion,
 		credential.AccessKeyID,
 		credential.SecretAccessKey)
 	jobId, err := glacierClient.GlacierAPI.PostJob(credential.UserId, DEFAULT_VAULT_NAME,
-		archiveId, DEFAULT_KAFKA_TOPIC, helper.CONFIG.GlacierTier, meta.HIDDEN_BUCKET_PREFIX + credential.UserId)
+		archiveId, DEFAULT_KAFKA_TOPIC, helper.CONFIG.Glacier.GlacierTier, meta.HIDDEN_BUCKET_PREFIX+credential.UserId)
 	if err != nil {
 		helper.Logger.Printf(5, "[ %s ] PostJob failed bucket %s object %s", reqId, bucketName, object.Name)
 		return 0, err
@@ -335,10 +332,10 @@ func (yig *YigStorage) GetArchiveStatus(ctx context.Context, bucketName, objectN
 
 	jobId, err := yig.MetaStorage.GetJobId(object)
 	if err != nil {
-		helper.Logger.Printf(10, "[ %s ] GetArchiveStatus GetJobId failed for bucket: %s object: %s id %s", reqId, 
-								object.BucketName, 
-								object.Name, 
-								object.ObjectId)
+		helper.Logger.Printf(10, "[ %s ] GetArchiveStatus GetJobId failed for bucket: %s object: %s id %s", reqId,
+			object.BucketName,
+			object.Name,
+			object.ObjectId)
 		return "", "", ErrInternalError
 	}
 
@@ -347,20 +344,20 @@ func (yig *YigStorage) GetArchiveStatus(ctx context.Context, bucketName, objectN
 		return meta.ArchiveStatusCodeNoJob, "", nil
 	}
 
-	glacierClient := glacier.NewClient(helper.CONFIG.GlacierHost,
-										helper.CONFIG.GlacierRegion,
-										credential.AccessKeyID,
-										credential.SecretAccessKey)
+	glacierClient := glacier.NewClient(helper.CONFIG.Glacier.GlacierHost,
+		helper.CONFIG.Glacier.GlacierRegion,
+		credential.AccessKeyID,
+		credential.SecretAccessKey)
 
 	job, err := glacierClient.GlacierAPI.GetJobStatus(credential.UserId, jobId, DEFAULT_VAULT_NAME)
 	if err == nil {
-		helper.Logger.Printf(20, "[ %s ] GetArchiveStatus job id %s Completed %v StatusCode %v for bucket: %s object: %s %s", 
-								reqId, jobId, job.Completed, job.StatusCode, object.BucketName, object.Name, object.ObjectId)
+		helper.Logger.Printf(20, "[ %s ] GetArchiveStatus job id %s Completed %v StatusCode %v for bucket: %s object: %s %s",
+			reqId, jobId, job.Completed, job.StatusCode, object.BucketName, object.Name, object.ObjectId)
 
 		if job.Completed && job.StatusCode == glaciertype.StatusCodeFailed {
 			return meta.ArchiveStatusCodeFailed, "", nil
 		}
-	
+
 		if job.Completed == false && job.StatusCode == glaciertype.StatusCodeInProgress {
 			return meta.ArchiveStatusCodeInProgress, "", nil
 		}
@@ -373,7 +370,7 @@ func (yig *YigStorage) GetArchiveStatus(ctx context.Context, bucketName, objectN
 
 	// A job may expire in 1 day. Check the restored object state then.
 	expireDate = ""
-	restoredObject, err := yig.MetaStorage.GetObject(ctx, meta.HIDDEN_BUCKET_PREFIX + credential.UserId, yig.GetRestoredObjectName(ctx, object), true)
+	restoredObject, err := yig.MetaStorage.GetObject(ctx, meta.HIDDEN_BUCKET_PREFIX+credential.UserId, yig.GetRestoredObjectName(ctx, object), true)
 	if err == nil {
 		expireDays, err := yig.MetaStorage.GetExpireDays(restoredObject)
 		if err == nil {
@@ -381,8 +378,8 @@ func (yig *YigStorage) GetArchiveStatus(ctx context.Context, bucketName, objectN
 		}
 	}
 
-	helper.Logger.Printf(20, "[ %s ] GetArchiveStatus return archiveStatus %s expireDate %s for bucket: %s object: %s version %s", 
-							reqId, archiveStatus, expireDate, bucketName, objectName, version)
+	helper.Logger.Printf(20, "[ %s ] GetArchiveStatus return archiveStatus %s expireDate %s for bucket: %s object: %s version %s",
+		reqId, archiveStatus, expireDate, bucketName, objectName, version)
 
 	return archiveStatus, expireDate, nil
 }
@@ -391,7 +388,7 @@ func (yig *YigStorage) GetObjectFromGlacier(ctx context.Context, object *meta.Ob
 	reqId := helper.RequestIdFromContext(ctx)
 	helper.Logger.Printf(20, "[ %s ] GetObjectFromGlacier bucket: %s object: %s %s version %s", reqId, object.BucketName, object.Name, object.ObjectId, version)
 
-	if helper.CONFIG.EnableGlacier == false {
+	if helper.CONFIG.Glacier.EnableGlacier == false {
 		helper.Logger.Printf(10, "[ %s ] Glacier not enabled", reqId)
 		return ErrInternalError
 	}
@@ -415,8 +412,8 @@ func (yig *YigStorage) GetObjectFromGlacier(ctx context.Context, object *meta.Ob
 		return ErrInternalError
 	}
 
-	glacierClient := glacier.NewClient(helper.CONFIG.GlacierHost,
-		helper.CONFIG.GlacierRegion,
+	glacierClient := glacier.NewClient(helper.CONFIG.Glacier.GlacierHost,
+		helper.CONFIG.Glacier.GlacierRegion,
 		credential.AccessKeyID,
 		credential.SecretAccessKey)
 
@@ -437,12 +434,12 @@ func (yig *YigStorage) GetObjectFromGlacier(ctx context.Context, object *meta.Ob
 	return nil
 }
 
-func (yig *YigStorage) DeleteObjectFromGlacier(ctx context.Context, bucketName, objectName, objectId, ownerId string, ) (err error) {
+func (yig *YigStorage) DeleteObjectFromGlacier(ctx context.Context, bucketName, objectName, objectId, ownerId string) (err error) {
 	reqId := helper.RequestIdFromContext(ctx)
 	helper.Logger.Printf(20, "[ %s ] DeleteObjectFromGlacier bucket: %s object: %s id %s ownerId %s", reqId, bucketName, objectName, objectId, ownerId)
 
-	if helper.CONFIG.EnableGlacier == false {
-		helper.Logger.Printf(10, "[ %s ] DeleteObjectFromGlacier but helper.CONFIG.EnableGlacier %t", reqId, helper.CONFIG.EnableGlacier)
+	if helper.CONFIG.Glacier.EnableGlacier == false {
+		helper.Logger.Printf(10, "[ %s ] DeleteObjectFromGlacier but helper.CONFIG.Glacier.EnableGlacier %t", reqId, helper.CONFIG.Glacier.EnableGlacier)
 	}
 
 	// TODO, it's possible that the account was deleted from iam.
@@ -457,15 +454,15 @@ func (yig *YigStorage) DeleteObjectFromGlacier(ctx context.Context, bucketName, 
 		Name:       objectName,
 		BucketName: bucketName,
 		OwnerId:    credential.UserId,
-		ObjectId:	objectId,
+		ObjectId:   objectId,
 	})
 	if err != nil {
 		helper.Logger.Printf(5, "[ %s ] GetArchiveId failed bucket %s object %s id %s", reqId, bucketName, objectName, objectId)
 		return ErrInternalError
 	}
 
-	glacierClient := glacier.NewClient(helper.CONFIG.GlacierHost,
-		helper.CONFIG.GlacierRegion,
+	glacierClient := glacier.NewClient(helper.CONFIG.Glacier.GlacierHost,
+		helper.CONFIG.Glacier.GlacierRegion,
 		credential.AccessKeyID,
 		credential.SecretAccessKey)
 

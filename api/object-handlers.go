@@ -261,29 +261,22 @@ func (api ObjectAPIHandlers) GetObjectHandler(w http.ResponseWriter, r *http.Req
 	helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "GetObjectHandler", object.StorageClass, meta.ObjectStorageClassGlacier, object.VersionId, version)
 
 	// Get object from hidden bucket.
-	if helper.CONFIG.EnableGlacier && object.StorageClass == meta.ObjectStorageClassGlacier {
+	if helper.CONFIG.Glacier.EnableGlacier && object.StorageClass == meta.ObjectStorageClassGlacier {
 		if object.SseType != "" {
 			// Should no happend. SSE object will not be trasitted as archives.
 			helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "GetObjectHandler glacier don't support sse or startoff")
 			WriteErrorResponse(w, r, ErrNotImplemented)
 			return
 		}
-		/*
-		if err = api.ObjectAPI.GetObjectFromGlacier(r.Context(), object, version, startOffset, length, writer, credential); err != nil {
-			helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "GetObjectHandler GetObjectFromGlacier failed")
-			WriteErrorResponse(w, r, err)
-			return
-		}
-		*/
 
 		// Find restored object name (archive id).
-		restoredObject, err := api.ObjectAPI.GetObjectInfo(r.Context(), 
-														meta.HIDDEN_BUCKET_PREFIX + credential.UserId, 
-														api.ObjectAPI.GetRestoredObjectName(r.Context(), object), 
-														"", 
-														credential)
+		restoredObject, err := api.ObjectAPI.GetObjectInfo(r.Context(),
+			meta.HIDDEN_BUCKET_PREFIX+credential.UserId,
+			api.ObjectAPI.GetRestoredObjectName(r.Context(), object),
+			"",
+			credential)
 		if err != nil {
-			helper.Logger.Printf(20, "[ %s ] GetObjectInfo failed for restored %s  err %v", 
+			helper.Logger.Printf(20, "[ %s ] GetObjectInfo failed for restored %s  err %v",
 				RequestIdFromContext(r.Context()), objectName, err)
 			WriteErrorResponse(w, r, ErrInvalidObjectState)
 			return
@@ -413,7 +406,7 @@ func (api ObjectAPIHandlers) HeadObjectHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Glacier
-	if helper.CONFIG.EnableGlacier && object.StorageClass == meta.ObjectStorageClassGlacier {
+	if helper.CONFIG.Glacier.EnableGlacier && object.StorageClass == meta.ObjectStorageClassGlacier {
 		// If the object is an archived object (an object whose storage class is GLACIER), the response includes this
 		// header if either the archive restoration is in progress (see RestoreObject) or an archive copy is already
 		// restored.
@@ -988,9 +981,8 @@ func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.
 		}
 	}
 
-
 	// Append is not supported with Archiving buckets.
-	if helper.CONFIG.EnableGlacier == true {
+	if helper.CONFIG.Glacier.EnableGlacier == true {
 		lc, err := api.ObjectAPI.GetBucketLc(r.Context(), bucketName, credential)
 		if err == nil {
 			for _, rule := range lc.Rule {
@@ -1876,8 +1868,8 @@ func (api ObjectAPIHandlers) RestoreObjectHandler(w http.ResponseWriter, r *http
 	reqId := RequestIdFromContext(ctx)
 	helper.Logger.Println(20, "[", reqId, "]", "RestoreObjectHandler")
 
-	if !helper.CONFIG.EnableGlacier {
-		helper.Logger.Println(20, "[", reqId, "]", "RestoreObjectHandler not enabled in config: helper.CONFIG.EnableGlacier %v", helper.CONFIG.EnableGlacier)
+	if !helper.CONFIG.Glacier.EnableGlacier {
+		helper.Logger.Println(20, "[", reqId, "]", "RestoreObjectHandler not enabled in config: helper.CONFIG.Glacier.EnableGlacier %v", helper.CONFIG.Glacier.EnableGlacier)
 		WriteErrorResponse(w, r, ErrNotImplemented)
 		return
 	}
@@ -1897,7 +1889,7 @@ func (api ObjectAPIHandlers) RestoreObjectHandler(w http.ResponseWriter, r *http
 	buffer, err := ioutil.ReadAll(io.LimitReader(r.Body, 1024))
 	if err != nil {
 		helper.ErrorIf(err, "Unable to read RestoreRequest body")
-		WriteErrorResponse(w, r, ErrInvalidAcl)
+		WriteErrorResponse(w, r, ErrInvalidRequestBody)
 		return
 	}
 
@@ -1939,14 +1931,14 @@ func (api ObjectAPIHandlers) RestoreObjectHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// job in process, return 409. 
+	// job in process, return 409.
 	// TODO: it's possible that two restore requests arrive simutanously and both issued to Glacier.
 	if archiveStatus == meta.ArchiveStatusCodeInProgress {
 		WriteErrorResponse(w, r, ErrRestoreAlreadyInProgress)
 		return
 	}
 
-	// Initiate a job to restore the object and return 202. 
+	// Initiate a job to restore the object and return 202.
 	statusCode, err := api.ObjectAPI.RestoreObjectFromGlacier(r.Context(), bucketName, objectName, version, restoreRequest.Days, restoreRequest.Tier, credential)
 	if err != nil {
 		helper.Logger.Println(2, "[", reqId, "]", "RestoreObjectFromGlacier failed for req:",

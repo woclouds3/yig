@@ -2,7 +2,6 @@ package datatype
 
 import (
 	"encoding/xml"
-	//	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
 )
 

@@ -81,7 +81,7 @@ func deleteFromCeph(index int) {
 					}
 				}
 			}
-		} else if helper.CONFIG.EnableGlacier && garbage.StorageClass == types.ObjectStorageClassGlacier {
+		} else if helper.CONFIG.Glacier.EnableGlacier && garbage.StorageClass == types.ObjectStorageClassGlacier {
 			// Remove Archive in Glacier. Big file should be the same as small file.
 			err = yigs[index].DeleteObjectFromGlacier(nil, garbage.BucketName, garbage.ObjectName, garbage.ObjectId, garbage.OwnerId)
 			// TODO, how to handle delete fail in glacier?
@@ -170,7 +170,7 @@ func main() {
 	yigs[0] = storage.New(logger, helper.CONFIG.MetaCacheType, helper.CONFIG.EnableDataCache, helper.CONFIG.CephConfigPattern)
 
 	// Glacier requires ak/sk, use this to initialize iam plugin in delete process.
-	if helper.CONFIG.EnableGlacier {
+	if helper.CONFIG.Glacier.EnableGlacier {
 		allPluginMap := mods.InitialPlugins()
 		iam.InitializeIamClient(allPluginMap)
 	}

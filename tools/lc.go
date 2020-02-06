@@ -198,8 +198,8 @@ func retrieveBucket(lc types.LifeCycle) error {
 				}
 
 				/* Check transition expire, add object to glacier and add the object to archive table. */
-				helper.Logger.Println(20, "[Transition]", object.BucketName, object.Name, helper.CONFIG.EnableGlacier, object.StorageClass, object.SseType, transitionDays, checkIfExpiration(object.LastModifiedTime, transitionDays))
-				if helper.CONFIG.EnableGlacier && object.StorageClass == types.ObjectStorageClassStandard && object.SseType == "" && transitionDays != -1 && checkIfExpiration(object.LastModifiedTime, transitionDays) && object.Size <= MAX_GLACIER_TRANSITION_SIZE {
+				helper.Logger.Println(20, "[Transition]", object.BucketName, object.Name, helper.CONFIG.Glacier.EnableGlacier, object.StorageClass, object.SseType, transitionDays, checkIfExpiration(object.LastModifiedTime, transitionDays))
+				if helper.CONFIG.Glacier.EnableGlacier && object.StorageClass == types.ObjectStorageClassStandard && object.SseType == "" && transitionDays != -1 && checkIfExpiration(object.LastModifiedTime, transitionDays) && object.Size <= MAX_GLACIER_TRANSITION_SIZE {
 					err = yig.TransitObjectToGlacier(nil, bucket, object)
 					if err != nil {
 						helper.Logger.Println(5, "[Transition FAILED]", object.BucketName, object.Name, object.VersionId, err)
@@ -435,7 +435,7 @@ func main() {
 	signalQueue = make(chan os.Signal)
 
 	// Glacier requires ak/sk, use this to initialize iam plugin in lc process.
-	if helper.CONFIG.EnableGlacier {
+	if helper.CONFIG.Glacier.EnableGlacier {
 		allPluginMap := mods.InitialPlugins()
 		iam.InitializeIamClient(allPluginMap)
 	}
@@ -448,8 +448,8 @@ func main() {
 	}
 	go getLifeCycles()
 
-	if helper.CONFIG.EnableGlacier {
-		for i := 0; i < helper.CONFIG.HiddenBucketLcThread; i++ {
+	if helper.CONFIG.Glacier.EnableGlacier {
+		for i := 0; i < helper.CONFIG.Glacier.HiddenBucketLcThread; i++ {
 			go processHiddenBucket()
 		}
 		go getHiddenBucket()		
