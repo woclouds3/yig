@@ -273,7 +273,7 @@ func (t *TidbClient) ListMultipartUploads(bucketName, keyMarker, uploadIdMarker,
 			timestamp := int64(math.MaxUint64 - uploadtime)
 			s := timestamp / 1e9
 			ns := timestamp % 1e9
-			upload.Initiated = time.Unix(s, ns).Format(CREATE_TIME_LAYOUT)
+			upload.Initiated = time.Unix(s, ns).UTC().Format(CREATE_TIME_LAYOUT)
 			uploads = append(uploads, upload)
 			count += 1
 		}
