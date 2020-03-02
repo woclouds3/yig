@@ -96,6 +96,39 @@ func (yig *YigStorage) SetBucketAcl(ctx context.Context, bucketName string, poli
 	return nil
 }
 
+func (yig *YigStorage) SetBucketLogging(ctx context.Context, bucketName string, bl datatype.BucketLoggingStatus, credential common.Credential) error {
+	bucket, err := yig.MetaStorage.GetBucket(ctx, bucketName, true)
+	if err != nil {
+		return err
+	}
+	if bucket.OwnerId != credential.UserId {
+		return ErrBucketAccessForbidden
+	}
+	bucket.BucketLogging = bl
+	err = yig.MetaStorage.Client.PutBucket(bucket)
+	if err != nil {
+		return err
+	}
+	yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucketName)
+
+	return nil
+}
+
+func (yig *YigStorage) GetBucketLogging(ctx context.Context, bucketName string, credential common.Credential) (bl datatype.BucketLoggingStatus,
+	err error) {
+	bucket, err := yig.MetaStorage.GetBucket(ctx, bucketName, true)
+	helper.Logger.Info(ctx, "Setting bucketlogging1::", bucket)
+	helper.Logger.Info(ctx, "Setting bucketlogging2::", bucket.BucketLogging)
+	if err != nil {
+		return bl, err
+	}
+	if bucket.OwnerId != credential.UserId {
+		//	  err = ErrBucketAccessForbidden
+		return
+	}
+	return bucket.BucketLogging, nil
+}
+
 func (yig *YigStorage) SetBucketLc(ctx context.Context, bucketName string, lc datatype.Lc,
 	credential common.Credential) error {
 	yig.Logger.Info(ctx, "enter SetBucketLc")
@@ -625,7 +658,7 @@ func (yig *YigStorage) ListVersionedObjects(ctx context.Context, credential comm
 		result.NextKeyMarker = url.QueryEscape(result.NextKeyMarker)
 	}
 
-	helper.Logger.Info(ctx, "ListVersionedObjects result:", len(result.Objects), result.IsTruncated, result.NextKeyMarker, result.NextVersionIdMarker, )
+	helper.Logger.Info(ctx, "ListVersionedObjects result:", len(result.Objects), result.IsTruncated, result.NextKeyMarker, result.NextVersionIdMarker)
 
 	return
 }
