@@ -17,7 +17,7 @@ const (
 func (m *Meta) GetCluster(ctx context.Context, fsid string, pool string) (cluster Cluster, err error) {
 	rowKey := fsid + ObjectNameEnding + pool
 	getCluster := func() (c helper.Serializable, err error) {
-		helper.Logger.Println(10, "[", helper.RequestIdFromContext(ctx), "]", "GetCluster CacheMiss. fsid:", fsid)
+		helper.Logger.Info(ctx, "GetCluster CacheMiss. fsid:", fsid)
 		cl, err := m.Client.GetCluster(fsid, pool)
 		c = &cl
 		return c, err
@@ -30,7 +30,7 @@ func (m *Meta) GetCluster(ctx context.Context, fsid string, pool string) (cluste
 
 	c, err := m.Cache.Get(ctx, redis.ClusterTable, CLUSTER_CACHE_PREFIX, rowKey, getCluster, toCluster, true)
 	if err != nil {
-		helper.Logger.Println(20, fmt.Sprintf("[ %s ] failed to get cluster for fsid: %s, err: %v", helper.RequestIdFromContext(ctx), fsid, err))
+		helper.Logger.Error(ctx, fmt.Sprintf("failed to get cluster for fsid: %s, err: %v", fsid, err))
 		return
 	}
 	cluster, ok := c.(Cluster)

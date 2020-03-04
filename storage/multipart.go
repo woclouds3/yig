@@ -542,18 +542,16 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 
 	md5Writer := md5.New()
 	var totalSize int64 = 0
-	helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "Upload parts:", uploadedParts, "uploadId:", uploadId)
+	helper.Logger.Info(ctx, "Upload parts:", uploadedParts, "uploadId:", uploadId)
 	for i := 0; i < len(uploadedParts); i++ {
 		if uploadedParts[i].PartNumber != i+1 {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]",
-				"uploadedParts[i].PartNumber != i+1; i:", i, "uploadId:", uploadId)
+			helper.Logger.Info(ctx, "uploadedParts[i].PartNumber != i+1; i:", i, "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
 		}
 		part, ok := multipart.Parts[i+1]
 		if !ok {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]",
-				"multipart.Parts[i+1] does not exist; i:", i, "uploadId:", uploadId)
+			helper.Logger.Info(ctx, "multipart.Parts[i+1] does not exist; i:", i, "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
 		}
@@ -566,7 +564,7 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 			return
 		}
 		if part.Etag != uploadedParts[i].ETag {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "part.Etag != uploadedParts[i].ETag;",
+			helper.Logger.Info(ctx, "part.Etag != uploadedParts[i].ETag;",
 				"i:", i, "Etag:", part.Etag, "reqEtag:", uploadedParts[i].ETag, "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
@@ -574,8 +572,7 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 		var etagBytes []byte
 		etagBytes, err = hex.DecodeString(part.Etag)
 		if err != nil {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]",
-				"hex.DecodeString(part.Etag) err;", "uploadId:", uploadId)
+			helper.Logger.Info(ctx, "hex.DecodeString(part.Etag) err;", "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
 		}

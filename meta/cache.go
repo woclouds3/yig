@@ -50,7 +50,7 @@ type entry struct {
 
 func newMetaCache(myType CacheType) (m MetaCache) {
 
-	helper.Logger.Printf(10, "Setting Up Metadata Cache: %s\n", cacheNames[int(myType)])
+	helper.Logger.Info(nil, "Setting Up Metadata Cache: %s\n", cacheNames[int(myType)])
 	if myType == SimpleCache {
 		m := new(enabledSimpleMetaCache)
 		m.Hit = 0
@@ -119,12 +119,11 @@ func (m *enabledSimpleMetaCache) Get(
 	onDeserialize func(map[string]string) (interface{}, error),
 	willNeed bool) (value interface{}, err error) {
 
-	requestId := helper.RequestIdFromContext(ctx)
-	helper.Logger.Println(10, "[", requestId, "]", "enabledSimpleMetaCache Get. table:", table, "key:", key)
+	helper.Logger.Info(ctx, "enabledSimpleMetaCache Get. table:", table, "key:", key)
 
 	fields, err := redis.HGetAll(table, prefix, key)
 	if err != nil {
-		helper.Logger.Println(5, "[", requestId, "]", "enabledSimpleMetaCache Get err:", err, "table:", table, "key:", key)
+		helper.Logger.Info(ctx, "enabledSimpleMetaCache Get err:", err, "table:", table, "key:", key)
 	}
 	if err == nil && fields != nil && len(fields) > 0 {
 		value, err = onDeserialize(fields)
@@ -137,7 +136,7 @@ func (m *enabledSimpleMetaCache) Get(
 		obj, err := onCacheMiss()
 		if err != nil {
 			if err != sql.ErrNoRows {
-				helper.Logger.Printf(20, "[ %s ] exec onCacheMiss() err: %v.", requestId, err)
+				helper.Logger.Error(ctx, "exec onCacheMiss() err: ", err)
 			}
 			return nil, err
 		}
@@ -145,12 +144,12 @@ func (m *enabledSimpleMetaCache) Get(
 		if willNeed == true {
 			values, err := obj.Serialize()
 			if err != nil {
-				helper.Logger.Println(2, "[", requestId, "]", "failed to serialize from %v", obj, " with err: ", err)
+				helper.Logger.Error(ctx, "failed to serialize from ", obj, " with err: ", err)
 				return nil, err
 			}
 			_, err = redis.HMSet(table, prefix, key, values)
 			if err != nil {
-				helper.Logger.Println(2, "[", requestId, "]", "failed to set key: ", key, " with err: ", err)
+				helper.Logger.Error(ctx, "failed to set key: ", key, " with err: ", err)
 				//do nothing, even if redis is down.
 			}
 		}

@@ -199,7 +199,7 @@ func (a *Client) GetCredential(accessKey string) (credential common.Credential, 
 
 func GetWocloudIamClient(config map[string]interface{}) (interface{}, error) {
 
-	helper.Logger.Printf(10, "Get plugin config: %v\n", config)
+	helper.Logger.Info(nil, "Get plugin config: \n", config)
 
 	c := &Client{
 		httpClient:  circuitbreak.NewCircuitClient(),

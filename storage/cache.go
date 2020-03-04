@@ -52,14 +52,12 @@ func (d *enabledDataCache) WriteFromCache(ctx context.Context, object *meta.Obje
 
 	file, err := redis.GetBytes(cacheKey, startOffset, startOffset+length-1)
 	if err == nil && file != nil && int64(len(file)) == length {
-		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]",
-			"File cache HIT. key:", cacheKey, "range:", startOffset, startOffset+length-1)
+		helper.Logger.Error(ctx, "File cache HIT. key:", cacheKey, "range:", startOffset, startOffset+length-1)
 		_, err := out.Write(file)
 		return err
 	}
 
-	helper.Debugln("[", helper.RequestIdFromContext(ctx), "]",
-		"File cache MISS. key:", cacheKey, "range:", startOffset, startOffset+length-1)
+	helper.Logger.Info(ctx, "File cache MISS. key:", cacheKey, "range:", startOffset, startOffset+length-1)
 
 	var buffer bytes.Buffer
 	onCacheMiss(&buffer)
@@ -95,12 +93,12 @@ func (d *enabledDataCache) GetAlignedReader(ctx context.Context, object *meta.Ob
 
 	file, err := redis.GetBytes(cacheKey, startOffset, startOffset+length-1)
 	if err == nil && file != nil && int64(len(file)) == length {
-		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "File cache HIT")
+		helper.Logger.Info(ctx, "File cache HIT")
 		r := newReadCloser(file)
 		return r, nil
 	}
 
-	helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "File cache MISS")
+	helper.Logger.Info(ctx, "File cache MISS")
 
 	var buffer bytes.Buffer
 	onCacheMiss(&buffer)
