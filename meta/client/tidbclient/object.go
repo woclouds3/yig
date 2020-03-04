@@ -4,12 +4,13 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	. "github.com/journeymidnight/yig/error"
-	. "github.com/journeymidnight/yig/meta/types"
-	"github.com/xxtea/xxtea-go/xxtea"
 	"math"
 	"strconv"
 	"time"
+
+	. "github.com/journeymidnight/yig/error"
+	. "github.com/journeymidnight/yig/meta/types"
+	"github.com/xxtea/xxtea-go/xxtea"
 )
 
 func (t *TidbClient) GetObject(bucketName, objectName, version string) (object *Object, err error) {
@@ -99,6 +100,10 @@ func (t *TidbClient) GetAllObject(bucketName, objectName, version string) (objec
 			return
 		}
 		versions = append(versions, sversion)
+	}
+	err = rows.Err()
+	if err != nil {
+		return nil, err
 	}
 	for _, v := range versions {
 		var obj *Object
@@ -210,6 +215,10 @@ func getParts(bucketName, objectName string, version uint64, cli *sql.DB) (parts
 			&p.InitializationVector,
 		)
 		parts[p.PartNumber] = p
+	}
+	err = rows.Err()
+	if err != nil {
+		return nil, err
 	}
 	return
 }

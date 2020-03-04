@@ -123,6 +123,10 @@ func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
 		}
 		buckets = append(buckets, &tmp)
 	}
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
 	return
 }
 
