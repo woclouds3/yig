@@ -22,7 +22,7 @@ import (
 
 type adminServerConfig struct {
 	Address string
-	Logger  *log.Logger
+	Logger  log.Logger
 	Yig     *storage.YigStorage
 }
 
@@ -69,7 +69,7 @@ func getBucketInfo(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value("claims").(jwt.MapClaims)
 	bucketName := claims["bucket"].(string)
 
-	helper.Debugln("[", api.RequestIdFromContext(r.Context()), "]", "bucketName:", bucketName)
+	helper.Logger.Info(r.Context(), "bucketName:", bucketName)
 	bucket, err := adminServer.Yig.MetaStorage.GetBucketInfo(r.Context(), bucketName)
 	if err != nil {
 		api.WriteErrorResponse(w, r, err)
@@ -90,7 +90,7 @@ func getUserInfo(w http.ResponseWriter, r *http.Request) {
 		api.WriteErrorResponse(w, r, err)
 		return
 	}
-	helper.Debugln("[", api.RequestIdFromContext(r.Context()), "]", "enter getUserInfo", uid, buckets)
+	helper.Logger.Info(r.Context(), "enter getUserInfo", uid, buckets)
 
 	var keys []common.Credential
 	if helper.CONFIG.DebugMode == false {
@@ -106,7 +106,7 @@ func getUserInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func getObjectInfo(w http.ResponseWriter, r *http.Request) {
-	helper.Debugln("[", api.RequestIdFromContext(r.Context()), "]", "enter getObjectInfo")
+	helper.Logger.Info(r.Context(), "enter getObjectInfo")
 	claims := r.Context().Value("claims").(jwt.MapClaims)
 	bucketName := claims["bucket"].(string)
 	objectName := claims["object"].(string)
@@ -122,7 +122,7 @@ func getObjectInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func getCacheHitRatio(w http.ResponseWriter, r *http.Request) {
-	helper.Debugln("[", api.RequestIdFromContext(r.Context()), "]", "enter getCacheHitRatio")
+	helper.Logger.Info(r.Context(), "enter getCacheHitRatio")
 
 	rate := adminServer.Yig.MetaStorage.Cache.GetCacheHitRatio()
 	b, _ := json.Marshal(cacheJson{HitRate: rate})
@@ -191,7 +191,7 @@ func startAdminServer(c *adminServerConfig) {
 
 	hosts, port := getListenIPs(adminServer) // get listen ips and port.
 
-	logger.Println(5, "\nS3 Object Storage:")
+	helper.Logger.Info(nil, "S3 Object Storage:")
 	// Print api listen ips.
 	printListenIPs(false, hosts, port)
 

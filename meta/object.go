@@ -2,6 +2,7 @@ package meta
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/journeymidnight/yig/error"
@@ -16,12 +17,12 @@ const (
 
 func (m *Meta) GetObject(ctx context.Context, bucketName string, objectName string, willNeed bool) (object *Object, err error) {
 	getObject := func() (o helper.Serializable, err error) {
-		helper.Logger.Println(10, "[", helper.RequestIdFromContext(ctx), "]", "GetObject CacheMiss. bucket:", bucketName, "object:", objectName)
+		helper.Logger.Info(ctx, "GetObject CacheMiss. bucket:", bucketName, "object:", objectName)
 		object, err := m.Client.GetObject(bucketName, objectName, "")
 		if err != nil {
 			return
 		}
-		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "GetObject object.Name:", object.Name)
+		helper.Logger.Info(ctx, "GetObject object.Name:", object.Name)
 		if object.Name != objectName {
 			err = ErrNoSuchKey
 			return
@@ -115,7 +116,6 @@ func (m *Meta) PutObject(ctx context.Context, object *Object, multipart *Multipa
 		}
 	}
 
-	requestId := helper.RequestIdFromContext(ctx)
 	if updateUsage {
 		ustart := time.Now()
 		err = m.UpdateUsage(ctx, object.BucketName, object.Size)
@@ -125,16 +125,16 @@ func (m *Meta) PutObject(ctx context.Context, object *Object, multipart *Multipa
 		uend := time.Now()
 		dur := uend.Sub(ustart)
 		if dur/1000000 >= 100 {
-			helper.Logger.Printf(5, "[ %s ] slow log: UpdateUsage, bucket %s, obj: %s, size: %d, takes %d",
-				requestId, object.BucketName, object.Name, object.Size, dur)
+			helper.Logger.Info(ctx, fmt.Sprintf("slow log: UpdateUsage, bucket %s, obj: %s, size: %d, takes %d",
+				object.BucketName, object.Name, object.Size, dur))
 		}
 	}
 	err = m.Client.CommitTrans(tx)
 	tend := time.Now()
 	dur := tend.Sub(tstart)
 	if dur/1000000 >= 100 {
-		helper.Logger.Printf(5, "[ %s ] slow log: MetaPutObject: bucket: %s, obj: %s, size: %d, takes %d",
-			requestId, object.BucketName, object.Name, object.Size, dur)
+		helper.Logger.Info(ctx, fmt.Sprintf("slow log: MetaPutObject: bucket: %s, obj: %s, size: %d, takes %d",
+			object.BucketName, object.Name, object.Size, dur))
 	}
 	return nil
 }

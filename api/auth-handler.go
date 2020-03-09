@@ -23,16 +23,16 @@ func checkRequestAuth(api ObjectAPIHandlers, r *http.Request, action policy.Acti
 	authType := signature.GetRequestAuthType(r)
 	switch authType {
 	case signature.AuthTypeUnknown:
-		helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "ErrAccessDenied: AuthTypeUnknown")
+		helper.Logger.Info(r.Context(), "ErrAccessDenied: AuthTypeUnknown")
 		return c, ErrAccessDenied
 	case signature.AuthTypeSignedV4, signature.AuthTypePresignedV4,
 		signature.AuthTypePresignedV2, signature.AuthTypeSignedV2:
-		helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "AuthTypeSigned:", authType)
+		helper.Logger.Info(r.Context(), "AuthTypeSigned:", authType)
 		if c, err := signature.IsReqAuthenticated(r); err != nil {
-			helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "ErrAccessDenied: IsReqAuthenticated return false:", err)
+			helper.Logger.Error(r.Context(), "ErrAccessDenied: IsReqAuthenticated return false:", err)
 			return c, err
 		} else {
-			helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "Credential:", c)
+			helper.Logger.Info(r.Context(), "Credential:", c)
 			// check bucket policy
 			c, err = IsBucketPolicyAllowed(c, api, r, action, bucketName, objectName)
 			return c, err
@@ -47,14 +47,14 @@ func checkRequestAuth(api ObjectAPIHandlers, r *http.Request, action policy.Acti
 func IsBucketPolicyAllowed(c common.Credential, api ObjectAPIHandlers, r *http.Request, action policy.Action, bucketName, objectName string) (common.Credential, error) {
 	bucket, err := api.ObjectAPI.GetBucket(r.Context(), bucketName)
 	if err != nil {
-		helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "GetBucket", bucketName, "err:", err)
+		helper.Logger.Error(r.Context(), "GetBucket", bucketName, "err:", err)
 		return c, err
 	}
 	if bucket.OwnerId == c.UserId {
 		return c, nil
 	}
-	helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "bucket.OwnerId:", bucket.OwnerId, "not equals c.UserId:", c.UserId)
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "GetBucketPolicy:", bucket.Policy)
+	helper.Logger.Info(r.Context(), "bucket.OwnerId:", bucket.OwnerId, "not equals c.UserId:", c.UserId)
+	helper.Logger.Info(r.Context(), "GetBucketPolicy:", bucket.Policy)
 	policyResult := bucket.Policy.IsAllowed(policy.Args{
 		AccountName:     c.UserId,
 		Action:          action,
@@ -65,11 +65,11 @@ func IsBucketPolicyAllowed(c common.Credential, api ObjectAPIHandlers, r *http.R
 	})
 	if policyResult == policy.PolicyAllow {
 		c.AllowOtherUserAccess = true
-		helper.Debugln("[", RequestIdFromContext(r.Context()), "]",
+		helper.Logger.Info(r.Context(),
 			"Allow", c.UserId, "access", bucketName, "with", action, objectName)
 		return c, nil
 	} else if policyResult == policy.PolicyDeny {
-		helper.Debugln("[", RequestIdFromContext(r.Context()), "]",
+		helper.Logger.Info(r.Context(),
 			"ErrAccessDenied: NotAllow", c.UserId, "access", bucketName, "with", action, objectName)
 		return c, ErrAccessDenied
 	} else {

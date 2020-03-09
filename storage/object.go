@@ -53,11 +53,10 @@ func (yig *YigStorage) PickOneClusterAndPool(ctx context.Context, bucket string,
 	}
 	var totalWeight int
 	clusterWeights := make(map[string]int, len(yig.DataStorage))
-	requestId := helper.RequestIdFromContext(ctx)
 	for fsid, _ := range yig.DataStorage {
 		cluster, err := yig.MetaStorage.GetCluster(ctx, fsid, poolName)
 		if err != nil {
-			helper.Debugln("[", requestId, "]", "Error getting cluster: ", err)
+			helper.Logger.Info(ctx, "Error getting cluster: ", err)
 			continue
 		}
 		if cluster.Weight == 0 {
@@ -66,11 +65,11 @@ func (yig *YigStorage) PickOneClusterAndPool(ctx context.Context, bucket string,
 		if needCheck {
 			pct, err := yig.DataStorage[fsid].GetUsedSpacePercent()
 			if err != nil {
-				helper.Logger.Println(0, "[", requestId, "]", "Error getting used space: ", err, "fsid: ", fsid)
+				helper.Logger.Warn(ctx, "Error getting used space: ", err, "fsid: ", fsid)
 				continue
 			}
 			if pct > CLUSTER_MAX_USED_SPACE_PERCENT {
-				helper.Logger.Println(0, "[", requestId, "]", "Cluster used space exceed ", CLUSTER_MAX_USED_SPACE_PERCENT, fsid)
+				helper.Logger.Warn(ctx, "Cluster used space exceed ", CLUSTER_MAX_USED_SPACE_PERCENT, fsid)
 				continue
 			}
 		}
@@ -78,7 +77,7 @@ func (yig *YigStorage) PickOneClusterAndPool(ctx context.Context, bucket string,
 		clusterWeights[fsid] = cluster.Weight
 	}
 	if len(clusterWeights) == 0 || totalWeight == 0 {
-		helper.Logger.Println(20, "[", requestId, "]", "Error picking cluster from table cluster in DB! Use first cluster in config to write.")
+		helper.Logger.Warn(ctx, "Error picking cluster from table cluster in DB! Use first cluster in config to write.")
 		for _, c := range yig.DataStorage {
 			cluster = c
 			break
@@ -270,7 +269,7 @@ func (yig *YigStorage) GetObject(ctx context.Context, object *meta.Object, start
 			// encrypted object
 			err = copyEncryptedPart(object.Pool, p, cephCluster, readOffset, readLength, encryptionKey, writer)
 			if err != nil {
-				helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "Multipart uploaded object write error:", err)
+				helper.Logger.Error(ctx, "Multipart uploaded object write error:", err)
 			}
 		}
 	}
@@ -461,14 +460,14 @@ func (yig *YigStorage) PutObject(ctx context.Context, bucketName string, objectN
 
 	tstart := time.Now()
 	encryptionKey, cipherKey, err := yig.encryptionKeyFromSseRequest(sseRequest, bucketName, objectName)
-	helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "enter PutObject get encryptionKey:", encryptionKey, "cipherKey:", cipherKey, "err:", err)
+	helper.Logger.Info(ctx, "enter PutObject get encryptionKey:", encryptionKey, "cipherKey:", cipherKey, "err:", err)
 	if err != nil {
 		return
 	}
 
 	bucket, err := yig.MetaStorage.GetBucket(ctx, bucketName, true)
 	if err != nil {
-		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "get bucket failed with err:", err)
+		helper.Logger.Error(ctx, "get bucket failed with err:", err)
 		return
 	}
 
@@ -520,8 +519,8 @@ func (yig *YigStorage) PutObject(ctx context.Context, bucketName string, objectN
 	cend := time.Now()
 	cdur := cend.Sub(cstart)
 	if cdur/1000000 >= 300 {
-		helper.Logger.Printf(5, "slow log: ceph put: bucket: %s, object: %s, size: %d, takes: %d",
-			bucketName, objectName, size, cdur)
+		helper.Logger.Info(ctx, fmt.Sprintf("slow log: ceph put: bucket: %s, object: %s, size: %d, takes: %d",
+			bucketName, objectName, size, cdur))
 	}
 	// Should metadata update failed, add `maybeObjectToRecycle` to `RecycleQueue`,
 	// so the object in Ceph could be removed asynchronously
@@ -532,12 +531,12 @@ func (yig *YigStorage) PutObject(ctx context.Context, bucketName string, objectN
 	}
 	if bytesWritten < size {
 		RecycleQueue <- maybeObjectToRecycle
-		helper.Logger.Printf(2, "[", helper.RequestIdFromContext(ctx), "]", "failed to write objects, already written(%d), total size(%d)", bytesWritten, size)
+		helper.Logger.Error(ctx, fmt.Sprintf("failed to write objects, already written(%d), total size(%d)", bytesWritten, size))
 		return result, ErrIncompleteBody
 	}
 
 	calculatedMd5 := hex.EncodeToString(md5Writer.Sum(nil))
-	helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "calculatedMd5:", calculatedMd5, "userMd5:", metadata["md5Sum"])
+	helper.Logger.Info(ctx, "calculatedMd5:", calculatedMd5, "userMd5:", metadata["md5Sum"])
 	if userMd5, ok := metadata["md5Sum"]; ok {
 		if userMd5 != "" && userMd5 != calculatedMd5 {
 			RecycleQueue <- maybeObjectToRecycle
@@ -615,8 +614,8 @@ func (yig *YigStorage) PutObject(ctx context.Context, bucketName string, objectN
 	tend := time.Now()
 	dur := tend.Sub(tstart)
 	if dur/1000000 >= 1000 {
-		helper.Logger.Printf(5, "slow log: PutOject: object: %s, bucket: %s, size: %d, takes: %d",
-			bucketName, objectName, object.Size, dur)
+		helper.Logger.Info(ctx, fmt.Sprintf("slow log: PutOject: object: %s, bucket: %s, size: %d, takes: %d",
+			bucketName, objectName, object.Size, dur))
 	}
 	return result, nil
 }
@@ -627,7 +626,7 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 	sseRequest datatype.SseRequest, storageClass meta.StorageClass, objInfo *meta.Object) (result datatype.AppendObjectResult, err error) {
 
 	encryptionKey, cipherKey, err := yig.encryptionKeyFromSseRequest(sseRequest, bucketName, objectName)
-	helper.Logger.Println(10, "[", helper.RequestIdFromContext(ctx), "]", "get encryptionKey:", encryptionKey, "cipherKey:", cipherKey, "err:", err)
+	helper.Logger.Info(ctx, "get encryptionKey:", encryptionKey, "cipherKey:", cipherKey, "err:", err)
 	if err != nil {
 		return
 	}
@@ -660,12 +659,12 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 		initializationVector = objInfo.InitializationVector
 		objSize = objInfo.Size
 		storageClass = objInfo.StorageClass
-		helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "request append oid:", oid, "iv:", initializationVector, "size:", objSize)
+		helper.Logger.Info(ctx, "request append oid:", oid, "iv:", initializationVector, "size:", objSize)
 	} else {
 		// New appendable object
 		cephCluster, poolName = yig.PickOneClusterAndPool(ctx, bucketName, objectName, size, true)
 		if cephCluster == nil || poolName != BIG_FILE_POOLNAME {
-			helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "PickOneClusterAndPool error")
+			helper.Logger.Error(ctx, "PickOneClusterAndPool error")
 			return result, ErrInternalError
 		}
 		// Mapping a shorter name for the object
@@ -676,7 +675,7 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 				return
 			}
 		}
-		helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "request first append oid:", oid, "iv:", initializationVector, "size:", objSize)
+		helper.Logger.Info(ctx, "request first append oid:", oid, "iv:", initializationVector, "size:", objSize)
 	}
 
 	dataReader := io.TeeReader(limitedDataReader, md5Writer)
@@ -687,7 +686,7 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 	}
 	bytesWritten, err := cephCluster.Append(poolName, oid, storageReader, offset, isObjectExist(objInfo))
 	if err != nil {
-		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "cephCluster.Append err:", err, poolName, oid, offset)
+		helper.Logger.Error(ctx, "cephCluster.Append err:", err, poolName, oid, offset)
 		return
 	}
 
@@ -736,18 +735,18 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 
 	result.LastModified = object.LastModifiedTime
 	result.NextPosition = object.Size
-	helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "Append info.", "bucket:", bucketName, "objName:", objectName, "oid:", oid,
+	helper.Logger.Info(ctx, "Append info.", "bucket:", bucketName, "objName:", objectName, "oid:", oid,
 		"objSize:", object.Size, "bytesWritten:", bytesWritten, "storageClass:", storageClass)
 	err = yig.MetaStorage.AppendObject(object, isObjectExist(objInfo))
 	if err != nil {
-		helper.Logger.Println(2, fmt.Sprintf("failed to append object %v, err: %v", object, err))
+		helper.Logger.Error(ctx, fmt.Sprintf("failed to append object %v, err: %v", object, err))
 		return
 	}
 
 	// update bucket usage.
 	err = yig.MetaStorage.UpdateUsage(ctx, bucketName, bytesWritten)
 	if err != nil {
-		helper.Logger.Println(2, fmt.Sprintf("failed to update bucket usage for bucket: %s with append object: %v, err: %v", bucketName, object, err))
+		helper.Logger.Error(ctx, fmt.Sprintf("failed to update bucket usage for bucket: %s with append object: %v, err: %v", bucketName, object, err))
 		return result, err
 	}
 	yig.MetaStorage.Cache.Remove(redis.ObjectTable, obj.OBJECT_CACHE_PREFIX, bucketName+":"+objectName+":")
@@ -772,7 +771,7 @@ func (yig *YigStorage) UpdateObjectAttrs(ctx context.Context, targetObject *meta
 
 	err = yig.MetaStorage.UpdateObjectAttrs(targetObject)
 	if err != nil {
-		yig.Logger.Println(5, "[", helper.RequestIdFromContext(ctx), "]", "Update Object Attrs, sql fails")
+		helper.Logger.Error(ctx, "Update Object Attrs, sql fails")
 		return result, ErrInternalError
 	}
 	result.LastModified = targetObject.LastModifiedTime
@@ -823,7 +822,7 @@ func (yig *YigStorage) CopyObject(ctx context.Context, targetObject *meta.Object
 		for i := 1; i <= len(targetObject.Parts); i++ {
 			part := targetObject.Parts[i]
 			targetParts[i] = part
-			result,err = func() (result datatype.PutObjectResult, err error) {
+			result, err = func() (result datatype.PutObjectResult, err error) {
 				pr, pw := io.Pipe()
 				defer pr.Close()
 				var total = part.Size
@@ -871,7 +870,7 @@ func (yig *YigStorage) CopyObject(ctx context.Context, targetObject *meta.Object
 				part.ObjectId = oid
 
 				part.InitializationVector = initializationVector
-				return result,nil
+				return result, nil
 			}()
 			if err != nil {
 				return result, err
@@ -1054,7 +1053,6 @@ func (yig *YigStorage) checkOldObject(ctx context.Context, bucketName, objectNam
 			}
 		}
 
-		reqId := helper.RequestIdFromContext(ctx)
 		if versioning == "Enabled" {
 			if !objMapExist && objectExist && object.NullVersion {
 				/*decrypted, err := meta.Decrypt(object.GetVersionNumber())
@@ -1067,14 +1065,14 @@ func (yig *YigStorage) checkOldObject(ctx context.Context, bucketName, objectNam
 				}*/
 				version, err = object.GetVersionNumber()
 				if err != nil {
-					helper.Debugln("[", reqId, "]", "-----------old object version:", err)
+					helper.Logger.Error(ctx, "old object version:", err)
 					return 0, err
 				}
-				helper.Debugln("[", reqId, "]", "-----------old object version:", version)
+				helper.Logger.Error(ctx, "old object version:", version)
 				return
 			}
 		} else {
-			helper.Debugln("[", reqId, "]", "object.NullVersion:", object.NullVersion)
+			helper.Logger.Info(ctx, "object.NullVersion:", object.NullVersion)
 			if objectExist && object.NullVersion {
 				err = yig.MetaStorage.DeleteObject(ctx, object, object.DeleteMarker, nil)
 				if err != nil {
@@ -1205,7 +1203,7 @@ func (yig *YigStorage) DeleteObject(ctx context.Context, bucketName string, obje
 			result.VersionId = version
 		}
 	default:
-		yig.Logger.Println(5, "[", helper.RequestIdFromContext(ctx), "]", "Invalid bucket versioning: ", bucketName)
+		yig.Logger.Error(ctx, "Invalid bucket versioning: ", bucketName)
 		return result, ErrInternalError
 	}
 
