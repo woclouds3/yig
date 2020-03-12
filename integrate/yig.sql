@@ -195,6 +195,7 @@ CREATE TABLE `objects` (
   `initializationvector` blob DEFAULT NULL,
   `type` tinyint(1) DEFAULT 0,
   `storageclass` tinyint(1) DEFAULT 0,
+  `transitioning` tinyint(1) DEFAULT 0,
    UNIQUE KEY `rowkey` (`bucketname`,`name`,`version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -243,6 +244,13 @@ DROP TABLE IF EXISTS `lifecycle`;
 CREATE TABLE `lifecycle` (
                        `bucketname` varchar(255) DEFAULT NULL,
                        `status` varchar(255) DEFAULT NULL,
+  UNIQUE KEY (`bucketname`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+
+DROP TABLE IF EXISTS `transition`;
+CREATE TABLE `transition` (
+  `bucketname` varchar(255) DEFAULT NULL,
+  `lastvisitedtime` datetime DEFAULT NULL,
   UNIQUE KEY (`bucketname`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 

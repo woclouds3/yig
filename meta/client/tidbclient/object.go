@@ -4,11 +4,13 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
 
 	. "github.com/journeymidnight/yig/error"
+	"github.com/journeymidnight/yig/helper"
 	. "github.com/journeymidnight/yig/meta/types"
 	"github.com/xxtea/xxtea-go/xxtea"
 )
@@ -47,6 +49,7 @@ func (t *TidbClient) GetObject(bucketName, objectName, version string) (object *
 		&object.InitializationVector,
 		&object.Type,
 		&object.StorageClass,
+		&object.Transitioning,
 	)
 	if err == sql.ErrNoRows {
 		err = ErrNoSuchKey
@@ -270,7 +273,7 @@ func (t *TidbClient) DeleteArchive(object *Object) error {
 func (t *TidbClient) DeleteParts(object *Object, part *Part) error {
 	sqltext := "delete from objectpart where bucketname=? and objectname=? and objectid=?"
 	_, err := t.Client.Exec(sqltext, object.BucketName, object.Name, part.ObjectId)
-	
+
 	return err
 }
 
@@ -285,4 +288,29 @@ func (t *TidbClient) GetExpireDays(object *Object) (days int64, err error) {
 	}
 
 	return
+}
+
+func (t *TidbClient) MarkObjectTransitioning(object *Object) error {
+	// TODO should use version.
+	sqltext := "update objects set transitioning=1 where bucketname=? and name=? and transitioning=0"
+	helper.Logger.Println(10, "sql: ", sqltext, object.BucketName, object.Name)
+	result, err := t.Client.Exec(sqltext, object.BucketName, object.Name)
+	if err != nil {
+		helper.Logger.Println(10, "MarkObjectTransitioning", err)
+		return err
+	}
+	helper.Logger.Println(20, "MarkObjectTransitioning result:", result)
+
+	affectedRows, err := result.RowsAffected()
+	if err != nil || affectedRows != 1 {
+		if err != nil {
+			helper.Logger.Println(5, "MarkObjectTransitioning:", err)
+			return err
+		}
+
+		helper.Logger.Println(20, "MarkObjectTransitioning already transitioned, result:", result)
+		return fmt.Errorf("object %s %s not found or transitioned!", object.BucketName, object.Name)
+	}
+
+	return nil
 }

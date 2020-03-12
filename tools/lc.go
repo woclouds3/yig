@@ -12,11 +12,9 @@ import (
 
 	"github.com/journeymidnight/yig/api/datatype"
 	"github.com/journeymidnight/yig/helper"
-	"github.com/journeymidnight/yig/iam"
 	"github.com/journeymidnight/yig/iam/common"
 	"github.com/journeymidnight/yig/log"
 	"github.com/journeymidnight/yig/meta/types"
-	"github.com/journeymidnight/yig/mods"
 	"github.com/journeymidnight/yig/redis"
 	"github.com/journeymidnight/yig/storage"
 )
@@ -24,11 +22,11 @@ import (
 const (
 	SCAN_HBASE_LIMIT                   = 50
 	DEFAULT_LC_LOG_PATH                = "/var/log/yig/lc.log"
-	DEFAULT_LC_SLEEP_INTERVAL_HOUR     = 1//TODO 24
+	DEFAULT_LC_SLEEP_INTERVAL_HOUR     = 1 //TODO 24
 	DEFAULT_LC_WAIT_FOR_GLACIER_MINUTE = 30
 	DEFAULT_LC_QUEUE_LENGTH            = 100
 
-	MAX_GLACIER_TRANSITION_SIZE        = 4 * storage.TB
+	MAX_GLACIER_TRANSITION_SIZE = 4 * storage.TB
 )
 
 var (
@@ -41,8 +39,8 @@ var (
 	stop        bool
 
 	// For Glacier only.
-	taskHiddenBucketQ 			chan string
-	hiddenBucketLcWaitGroup 	sync.WaitGroup
+	taskHiddenBucketQ       chan string
+	hiddenBucketLcWaitGroup sync.WaitGroup
 )
 
 func getLifeCycles() {
@@ -100,7 +98,7 @@ func checkIfExpiration(updateTime time.Time, days int) bool {
 	}
 }
 
-// If a rule has an empty prifex ,the days in it will be consider as a default days for all objects that not specified in
+// If a rule has an empty prefix ,the days in it will be consider as a default days for all objects that not specified in
 // other rules. For this reason, we have two conditions to check if a object has expired and should be deleted
 //  if defaultConfig == true
 //                    for each object           check if object name has a prifix
@@ -116,8 +114,6 @@ func checkIfExpiration(updateTime time.Time, days int) bool {
 func retrieveBucket(lc types.LifeCycle) error {
 	defaultConfig := false
 	defaultDays := -1
-	defaultTransitionDays := -1
-	transitionDays := -1
 	bucket, err := yig.MetaStorage.GetBucket(nil, lc.BucketName, false)
 	if err != nil {
 		return err
@@ -132,11 +128,6 @@ func retrieveBucket(lc types.LifeCycle) error {
 					return err
 				}
 			}
-
-			if rule.TransitionStorageClass == "GLACIER" {
-				defaultTransitionDays = int(rule.TransitionDays)
-			}
-
 		}
 	}
 	var request datatype.ListObjectsRequest
@@ -146,13 +137,13 @@ func retrieveBucket(lc types.LifeCycle) error {
 		for {
 			retObjects, _, truncated, nextMarker, nextVerIdMarker, err := yig.ListObjectsInternal(nil, bucket.Name, request)
 			if err != nil {
+				logger.Println(5, "[Failed] retrieveBucket ListObjectsInternal failed", bucket.Name)
 				return err
 			}
 
 			for _, object := range retObjects {
 				prefixMatch := false
 				matchDays := 0
-				matchTransitionDays := -1
 				for _, rule := range rules {
 					if rule.Prefix == "" {
 						continue
@@ -165,17 +156,12 @@ func retrieveBucket(lc types.LifeCycle) error {
 					if err != nil {
 						return err
 					}
-					if rule.TransitionStorageClass == "GLACIER" {
-						matchTransitionDays = int(rule.TransitionDays)
-					}
 				}
 				days := 0
 				if prefixMatch == true {
 					days = matchDays
-					transitionDays = matchTransitionDays
 				} else {
 					days = defaultDays
-					transitionDays = defaultTransitionDays
 				}
 				helper.Debugln("interval:", time.Since(object.LastModifiedTime).Seconds())
 
@@ -196,18 +182,6 @@ func retrieveBucket(lc types.LifeCycle) error {
 
 					continue
 				}
-
-				/* Check transition expire, add object to glacier and add the object to archive table. */
-				helper.Logger.Println(20, "[Transition]", object.BucketName, object.Name, helper.CONFIG.Glacier.EnableGlacier, object.StorageClass, object.SseType, transitionDays, checkIfExpiration(object.LastModifiedTime, transitionDays))
-				if helper.CONFIG.Glacier.EnableGlacier && object.StorageClass == types.ObjectStorageClassStandard && object.SseType == "" && transitionDays != -1 && checkIfExpiration(object.LastModifiedTime, transitionDays) && object.Size <= MAX_GLACIER_TRANSITION_SIZE {
-					err = yig.TransitObjectToGlacier(nil, bucket, object)
-					if err != nil {
-						helper.Logger.Println(5, "[Transition FAILED]", object.BucketName, object.Name, object.VersionId, err)
-						fmt.Println("[Transition FAILED]", object.BucketName, object.Name, object.VersionId, err)
-						continue
-					}
-				}
-
 			}
 			if truncated == true {
 				request.KeyMarker = nextMarker
@@ -245,16 +219,6 @@ func retrieveBucket(lc types.LifeCycle) error {
 						fmt.Println("[DELETED]", object.BucketName, object.Name, object.VersionId)
 
 						continue
-					}
-
-					/* Check transition expire, add object to glacier and add the object to gc table. */
-					if object.StorageClass == types.ObjectStorageClassGlacier && transitionDays != -1 && checkIfExpiration(object.LastModifiedTime, transitionDays) {
-						err = yig.TransitObjectToGlacier(nil, bucket, object)
-						if err != nil {
-							helper.Logger.Println(5, "[Transition FAILED]", object.BucketName, object.Name, object.VersionId, err)
-							fmt.Println("[Transition FAILED]", object.BucketName, object.Name, object.VersionId, err)
-							continue
-						}
 					}
 				}
 				if truncated == true {
@@ -305,114 +269,6 @@ func processLifecycle() {
 	}
 }
 
-func getHiddenBucket() {
-	var marker string
-	helper.Logger.Println(5, 5, "[Glacier] hidden bucket lifecycle handle start")
-	hiddenBucketLcWaitGroup.Add(1)
-	defer hiddenBucketLcWaitGroup.Done()
-	for {
-		if stop {
-			helper.Logger.Print(5, ".")
-			return
-		}
-
-		if len(taskHiddenBucketQ) > DEFAULT_LC_QUEUE_LENGTH {
-			helper.Logger.Println(5, 5, "taskHiddenBucketQ", len(taskHiddenBucketQ), "too long, sleep")
-			time.Sleep(DEFAULT_LC_WAIT_FOR_GLACIER_MINUTE * time.Minute)
-			continue
-		}
-
-		buckets, truncated, err := yig.MetaStorage.ScanHiddenBuckets(nil, SCAN_HBASE_LIMIT, marker)
-		if err != nil {
-			helper.Logger.Println(5, "ScanHiddenBucketLifeCycle failed", err)
-			signalQueue <- syscall.SIGQUIT
-			return
-		}
-
-		helper.Logger.Println(20, "Scanned hidden buckets: ", buckets, truncated, "len:", len(buckets))
-
-		if len(buckets) == 0 {
-			marker = ""
-			time.Sleep(DEFAULT_LC_SLEEP_INTERVAL_HOUR * time.Hour)
-			continue
-		}
-
-		for _, entry := range buckets {
-			taskHiddenBucketQ <- entry
-			helper.Logger.Println(20, "getHiddenBucket sent a bucket name:", entry)
-			marker = entry
-		}
-	}
-
-}
-
-func processHiddenBucket() {
-	time.Sleep(time.Second * 1)
-	for {
-		if stop {
-			helper.Logger.Print(5, ".")
-			return
-		}
-
-		bucketName := <-taskHiddenBucketQ
-		helper.Logger.Println(20, "processHiddenBucket receive a bucket:", bucketName)
-		waitgroup.Add(1)
-		err := retrieveHiddenBucket(bucketName)
-		if err != nil {
-			logger.Println(5, "[ERR] Bucket: ", bucketName, err)
-		} else {
-			fmt.Printf("[DONE] Bucket:%s\n", bucketName)
-		}
-		waitgroup.Done()
-	}
-}
-
-func retrieveHiddenBucket(bucketName string) error {
-	if !strings.HasPrefix(bucketName, types.HIDDEN_BUCKET_PREFIX) {
-		return fmt.Errorf("bucket %s is not a hidden bucket %s !", bucketName, types.HIDDEN_BUCKET_PREFIX)
-	}
-
-	var request datatype.ListObjectsRequest
-	request.Versioned = false
-	request.MaxKeys = 1000
-
-	for {
-		retObjects, _, truncated, nextMarker, nextVerIdMarker, err := yig.ListObjectsInternal(nil, bucketName, request)
-		if err != nil {
-			helper.Logger.Println(20, "[ HiddenBucket ] failed for bucket %s request %v", bucketName, request)
-			return err
-		}
-
-		helper.Logger.Printf(20, "[ HiddenBucket ] bucket %s objects %v", bucketName, retObjects)
-
-		for _, object := range retObjects {
-			days, err := yig.MetaStorage.GetExpireDays(object)
-			if err != nil {
-				helper.Logger.Printf(10, "[ HiddenBucket ] GetExpireDays failed for bucket %s object %v", bucketName, object)
-				return err
-			}
-			/* Check expiration only. */
-			if days > 0 && checkIfExpiration(object.LastModifiedTime, int(days)) {
-				_, err = yig.DeleteObject(nil, object.BucketName, object.Name, "", common.Credential{})
-				if err != nil {
-					helper.Logger.Println(10, "[Hidden Bucket Delete FAILED]", object.BucketName, object.Name, days, err)
-				} else {
-					helper.Logger.Println(20, "[Hidden Bucket Object DELETED]", object.BucketName, object.Name, days)
-				}
-			}
-		}
-
-		if len(retObjects) != 0 || truncated == true {
-			request.KeyMarker = nextMarker
-			request.VersionIdMarker = nextVerIdMarker
-		} else {
-			break
-		}
-	}
-
-	return nil
-}
-
 func main() {
 	helper.SetupConfig()
 
@@ -434,12 +290,6 @@ func main() {
 	signal.Ignore()
 	signalQueue = make(chan os.Signal)
 
-	// Glacier requires ak/sk, use this to initialize iam plugin in lc process.
-	if helper.CONFIG.Glacier.EnableGlacier {
-		allPluginMap := mods.InitialPlugins()
-		iam.InitializeIamClient(allPluginMap)
-	}
-
 	numOfWorkers := helper.CONFIG.LcThread
 	helper.Logger.Println(5, "start lc thread:", numOfWorkers)
 	empty = false
@@ -447,13 +297,6 @@ func main() {
 		go processLifecycle()
 	}
 	go getLifeCycles()
-
-	if helper.CONFIG.Glacier.EnableGlacier {
-		for i := 0; i < helper.CONFIG.Glacier.HiddenBucketLcThread; i++ {
-			go processHiddenBucket()
-		}
-		go getHiddenBucket()		
-	}
 
 	signal.Notify(signalQueue, syscall.SIGINT, syscall.SIGTERM,
 		syscall.SIGQUIT, syscall.SIGHUP)

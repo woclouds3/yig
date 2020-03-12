@@ -17,27 +17,27 @@ import (
 )
 
 const (
-	GLACIER_TEST_BUCKET             = "test-glacier-bucket2"
-	GLACIER_TEST_OBJECT             = "test-smallfile.txt"
-	GLACIER_TEST_SMALL_FILE_CONTENT = "Glacier test small file content"
-	GLACIER_ACCOUNT_ID              = ""
-	TEST_S3_HOST                    = "http://s3.test.com:80"
-	TEST_S3_REGION					= "cn-bj-1"
-	GLACIER_TEST_AK                 = "U5S0O3O15DDPCGVF9MB6"
-	GLACIER_TEST_SK                 = "W59APTYZ1MG6S5SDS9KPFCCY6R3A2IF3T705A5ZT"
-	GLACIER_TEST_BIG_OBJECT         = "test-bigfile-"
-	GLACIER_TEST_BIG_OBJECT_UNALIGNED	= "test-bigfile-unaligned-"
+	GLACIER_TEST_BUCKET               = "test-glacier-bucket2"
+	GLACIER_TEST_OBJECT               = "test-smallfile.txt"
+	GLACIER_TEST_SMALL_FILE_CONTENT   = "Glacier test small file content"
+	GLACIER_ACCOUNT_ID                = ""
+	TEST_S3_HOST                      = "http://s3.test.com:80"
+	TEST_S3_REGION                    = "cn-bj-1"
+	GLACIER_TEST_AK                   = "U5S0O3O15DDPCGVF9MB6"
+	GLACIER_TEST_SK                   = "W59APTYZ1MG6S5SDS9KPFCCY6R3A2IF3T705A5ZT"
+	GLACIER_TEST_BIG_OBJECT           = "test-bigfile-"
+	GLACIER_TEST_BIG_OBJECT_UNALIGNED = "test-bigfile-unaligned-"
 
-	DEFAULT_RESTORE_TIME_PER_UNIT	= 60
-	DEFAULT_RESTORE_TIME_UNIT		= 256 // MB
+	DEFAULT_RESTORE_TIME_PER_UNIT = 60
+	DEFAULT_RESTORE_TIME_UNIT     = 256 // MB
 
-	DEFAULT_READER_TYPE				= iota 
+	DEFAULT_READER_TYPE = iota
 	UNALIGNED_READER_TYPE
 )
 
 var files [][]int = [][]int{
-	[]int {5, 5, 5},
-	[]int {60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60},
+	[]int{5, 5, 5},
+	[]int{60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60},
 	// [] int {50, 50, 50, 50, 56, 50, 50, 50, 50, 56},
 	// []int{100, 100, 56, 100, 100, 56},
 	// []int{256, 256, 256, 256},
@@ -45,11 +45,11 @@ var files [][]int = [][]int{
 }
 
 var randomFiles [][]int = [][]int{
-	[] int {5 * MB + 10, 5 * MB - 10},
-	[] int {50 * MB, 50 * MB, 50 * MB, 50 * MB, 56 * MB - 10, 
-			50 * MB, 50 * MB, 50 * MB, 50 * MB, 56 * MB - 10,
-			50 * MB, 50 * MB, 50 * MB, 50 * MB, 56 * MB,
-			50 * MB, 50 * MB, 50 * MB, 50 * MB, 80 * MB},
+	[]int{5*MB + 10, 5*MB - 10},
+	[]int{50 * MB, 50 * MB, 50 * MB, 50 * MB, 56*MB - 10,
+		50 * MB, 50 * MB, 50 * MB, 50 * MB, 56*MB - 10,
+		50 * MB, 50 * MB, 50 * MB, 50 * MB, 56 * MB,
+		50 * MB, 50 * MB, 50 * MB, 50 * MB, 80 * MB},
 }
 
 func handleErr(t *testing.T, err error, funcName string) {
@@ -61,10 +61,10 @@ func handleErr(t *testing.T, err error, funcName string) {
 }
 
 type bigFilePartsReader struct {
-	size   int64
-	offset int64
-	readerType	int
-	partOffset	int64
+	size       int64
+	offset     int64
+	readerType int
+	partOffset int64
 }
 
 func (r *bigFilePartsReader) Read(p []byte) (n int, err error) {
@@ -128,11 +128,11 @@ func TransitionBigObjectUploadHelper(t *testing.T, fileName string, fileSize []i
 	creds := credentials.NewStaticCredentials(GLACIER_TEST_AK, GLACIER_TEST_SK, "")
 	sc := s3.New(session.Must(session.NewSession(
 		&aws.Config{
-			Credentials: creds,
-			DisableSSL:  aws.Bool(true),
-			Endpoint:    aws.String(TEST_S3_HOST),
-			Region:      aws.String("r"),
-			S3ForcePathStyle:	aws.Bool(true),
+			Credentials:      creds,
+			DisableSSL:       aws.Bool(true),
+			Endpoint:         aws.String(TEST_S3_HOST),
+			Region:           aws.String("r"),
+			S3ForcePathStyle: aws.Bool(true),
 		},
 	)))
 
@@ -141,7 +141,7 @@ func TransitionBigObjectUploadHelper(t *testing.T, fileName string, fileSize []i
 		Bucket: aws.String(GLACIER_TEST_BUCKET),
 		Key:    aws.String(fileName),
 	})
-	handleErr(t, err, "CreateMultipartUpload " + fileName)
+	handleErr(t, err, "CreateMultipartUpload "+fileName)
 
 	defer sc.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
 		Bucket:   aws.String(GLACIER_TEST_BUCKET),
@@ -160,26 +160,26 @@ func TransitionBigObjectUploadHelper(t *testing.T, fileName string, fileSize []i
 		var body io.ReadSeeker
 		if readerType == DEFAULT_READER_TYPE {
 			body = aws.ReadSeekCloser(&bigFilePartsReader{
-				size:   int64(fileSize[partNumber-1] * MB),
-				offset: 0,
-				readerType:	readerType,
-				partOffset:	totalSize,
+				size:       int64(fileSize[partNumber-1] * MB),
+				offset:     0,
+				readerType: readerType,
+				partOffset: totalSize,
 			})
 
 			totalSize += int64(fileSize[partNumber-1]) * MB
 		} else if readerType == UNALIGNED_READER_TYPE {
 			body = aws.ReadSeekCloser(&bigFilePartsReader{
-				size:   int64(fileSize[partNumber-1]),
-				offset: 0,
-				readerType:	readerType,
-				partOffset:	totalSize,
+				size:       int64(fileSize[partNumber-1]),
+				offset:     0,
+				readerType: readerType,
+				partOffset: totalSize,
 			})
 
 			totalSize += int64(fileSize[partNumber-1])
 		}
 
 		partResult, err := sc.UploadPart(&s3.UploadPartInput{
-			Body: 		body,
+			Body:       body,
 			Bucket:     aws.String(GLACIER_TEST_BUCKET),
 			Key:        aws.String(fileName),
 			PartNumber: aws.Int64(int64(partNumber)),
@@ -214,11 +214,11 @@ func TransitionBigObjectVerifyHelper(t *testing.T, fileName string, fileSize []i
 	creds := credentials.NewStaticCredentials(GLACIER_TEST_AK, GLACIER_TEST_SK, "")
 	sc := s3.New(session.Must(session.NewSession(
 		&aws.Config{
-			Credentials: creds,
-			DisableSSL:  aws.Bool(true),
-			Endpoint:    aws.String(TEST_S3_HOST),
-			Region:      aws.String("r"),
-			S3ForcePathStyle:	aws.Bool(true),
+			Credentials:      creds,
+			DisableSSL:       aws.Bool(true),
+			Endpoint:         aws.String(TEST_S3_HOST),
+			Region:           aws.String("r"),
+			S3ForcePathStyle: aws.Bool(true),
 		},
 	)))
 
@@ -254,16 +254,16 @@ func TransitionBigObjectVerifyHelper(t *testing.T, fileName string, fileSize []i
 			},
 		},
 	})
-//	handleErr(t, err, "RestoreObject")
+	//	handleErr(t, err, "RestoreObject")
 
 	size := 0
-	for _, partSize := range(fileSize) {
+	for _, partSize := range fileSize {
 		size += partSize
 	}
 	if readerType == UNALIGNED_READER_TYPE {
 		size /= MB
 	}
-	size = size / DEFAULT_RESTORE_TIME_UNIT + 1
+	size = size/DEFAULT_RESTORE_TIME_UNIT + 1
 
 	fmt.Println("Restoring...Wait for", size, "min")
 	for i := 0; i < size; i++ {
@@ -290,17 +290,17 @@ func TransitionBigObjectVerifyHelper(t *testing.T, fileName string, fileSize []i
 					handleErr(t, err, "Read failed for "+fileName+" part "+strconv.Itoa(i)+" offset "+strconv.Itoa(offset)+" outputLen "+strconv.Itoa(outputLen))
 					t.FailNow()
 				}
-	
+
 				for j := 0; j < outputLen; j++ {
 					if buf[j] != byte(offset) {
-						fmt.Println("Verify failed for", fileName, "part", i, "outputLen", outputLen,  
-									"offset", offset, byte(offset), "j", j, "content", buf[j])
-						
+						fmt.Println("Verify failed for", fileName, "part", i, "outputLen", outputLen,
+							"offset", offset, byte(offset), "j", j, "content", buf[j])
+
 						//fmt.Println(buf)
 						t.FailNow()
 					}
 				}
-	
+
 				// fmt.Println(i, size, offset, outputLen)
 			}
 		}
@@ -312,7 +312,7 @@ func TransitionBigObjectVerifyHelper(t *testing.T, fileName string, fileSize []i
 				if i >= outputLen {
 					break
 				}
-				if content != byte(totalOffset + i) {
+				if content != byte(totalOffset+i) {
 					fmt.Println("totalOffset", totalOffset, "i", i, "content", content)
 					fmt.Println(buf)
 					t.FailNow()
@@ -336,11 +336,11 @@ func TransitionBigObjectDeleteHelper(t *testing.T, fileName string) {
 	creds := credentials.NewStaticCredentials(GLACIER_TEST_AK, GLACIER_TEST_SK, "")
 	sc := s3.New(session.Must(session.NewSession(
 		&aws.Config{
-			Credentials: creds,
-			DisableSSL:  aws.Bool(true),
-			Endpoint:    aws.String(TEST_S3_HOST),
-			Region:      aws.String("r"),
-			S3ForcePathStyle:	aws.Bool(true),
+			Credentials:      creds,
+			DisableSSL:       aws.Bool(true),
+			Endpoint:         aws.String(TEST_S3_HOST),
+			Region:           aws.String("r"),
+			S3ForcePathStyle: aws.Bool(true),
 		},
 	)))
 
@@ -349,18 +349,18 @@ func TransitionBigObjectDeleteHelper(t *testing.T, fileName string) {
 		Key:    aws.String(fileName),
 	})
 
-	handleErr(t, err, "DeleteObject " + fileName)
+	handleErr(t, err, "DeleteObject "+fileName)
 }
 
 func Test_TransitionMakeBucket(t *testing.T) {
 	creds := credentials.NewStaticCredentials(GLACIER_TEST_AK, GLACIER_TEST_SK, "")
 	sc := s3.New(session.Must(session.NewSession(
 		&aws.Config{
-			Credentials: creds,
-			DisableSSL:  aws.Bool(true),
-			Endpoint:    aws.String(TEST_S3_HOST),
-			Region:      aws.String("r"),
-			S3ForcePathStyle:	aws.Bool(true),
+			Credentials:      creds,
+			DisableSSL:       aws.Bool(true),
+			Endpoint:         aws.String(TEST_S3_HOST),
+			Region:           aws.String("r"),
+			S3ForcePathStyle: aws.Bool(true),
 		},
 	),
 	),
@@ -382,9 +382,9 @@ func Test_TransitionMakeBucket(t *testing.T) {
 			Rules: []*s3.LifecycleRule{
 				{
 					/*
-					Expiration: &s3.LifecycleExpiration{
-						Days: aws.Int64(365),
-					},
+						Expiration: &s3.LifecycleExpiration{
+							Days: aws.Int64(365),
+						},
 					*/
 					ID:     aws.String("TestOnly"),
 					Status: aws.String("Enabled"),
@@ -405,11 +405,11 @@ func Test_TransitionSmallObject(t *testing.T) {
 	creds := credentials.NewStaticCredentials(GLACIER_TEST_AK, GLACIER_TEST_SK, "")
 	sc := s3.New(session.Must(session.NewSession(
 		&aws.Config{
-			Credentials: creds,
-			DisableSSL:  aws.Bool(true),
-			Endpoint:    aws.String(TEST_S3_HOST),
-			Region:      aws.String("r"),
-			S3ForcePathStyle:	aws.Bool(true),
+			Credentials:      creds,
+			DisableSSL:       aws.Bool(true),
+			Endpoint:         aws.String(TEST_S3_HOST),
+			Region:           aws.String("r"),
+			S3ForcePathStyle: aws.Bool(true),
 		},
 	),
 	),
@@ -432,11 +432,11 @@ func Test_TransitionSmallObject(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	// Start Lc.
-	cmd := exec.Command("bash", "-c", "/work/lc&")
+	cmd := exec.Command("bash", "-c", "/work/transition&")
 	err = cmd.Run()
-	handleErr(t, err, "Run lc")
+	handleErr(t, err, "Run transition")
 
-	fmt.Println("Lc Started, waiting for transition...")
+	fmt.Println("transition Started, waiting for transition...")
 	time.Sleep(60 * time.Second)
 
 	// Check the object, should be "StorageClass" Glacier.
@@ -517,10 +517,10 @@ func Test_TransitionBigObjectUpload(t *testing.T) {
 
 func Test_TransitionStartLc(t *testing.T) {
 	// Start Lc.
-	cmd := exec.Command("bash", "-c", "/work/lc&")
+	cmd := exec.Command("bash", "-c", "/work/transition&")
 	err := cmd.Run()
-	handleErr(t, err, "Run lc")
-	t.Log("Lc started.")
+	handleErr(t, err, "Run transition")
+	t.Log("transition started.")
 }
 
 func Test_TransitionBigObjectVerify(t *testing.T) {
@@ -560,11 +560,11 @@ func Test_TransitionEnd(t *testing.T) {
 	creds := credentials.NewStaticCredentials(GLACIER_TEST_AK, GLACIER_TEST_SK, "")
 	sc := s3.New(session.Must(session.NewSession(
 		&aws.Config{
-			Credentials: creds,
-			DisableSSL:  aws.Bool(true),
-			Endpoint:    aws.String(TEST_S3_HOST),
-			Region:      aws.String("r"),
-			S3ForcePathStyle:	aws.Bool(true),
+			Credentials:      creds,
+			DisableSSL:       aws.Bool(true),
+			Endpoint:         aws.String(TEST_S3_HOST),
+			Region:           aws.String("r"),
+			S3ForcePathStyle: aws.Bool(true),
 		},
 	),
 	),

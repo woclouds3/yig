@@ -241,3 +241,7 @@ func (m *Meta) GetExpireDays(object *Object) (days int64, err error) {
 //	err := m.Client.DeleteObjectMap(objMap, nil)
 //	return err
 //}
+
+func (m *Meta) MarkObjectTransitioning(object *Object) error {
+	return m.Client.MarkObjectTransitioning(object)
+}
