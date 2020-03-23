@@ -115,7 +115,15 @@ func (h resourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Skip the first element which is usually '/' and split the rest.
 	tstart := time.Now()
 	bucketName, objectName := GetBucketAndObjectInfoFromRequest(r)
-	helper.Logger.Info(r.Context(), "ServeHTTP", bucketName, objectName)
+	helper.Logger.Info(r.Context(), "ServeHTTP", bucketName, objectName, "Hostname:", strings.Split(r.Host, ":"))
+
+	// Check host name with configuration.
+	if isValidHostName(r) == false {
+		helper.Logger.Error(r.Context(), "resourceHandler invalid host name. Host:", r.Host)
+		WriteErrorResponse(w, r, ErrAccessDenied)
+		return
+	}
+
 	// If bucketName is present and not objectName check for bucket
 	// level resource queries.
 	if bucketName != "" && objectName == "" {
@@ -310,4 +318,27 @@ func GetBucketAndObjectInfoFromRequest(r *http.Request) (bucketName string, obje
 		}
 	}
 	return
+}
+
+func isValidHostName(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+
+	v := strings.Split(r.Host, ":")
+	hostWithOutPort := v[0]
+
+	for _, d := range helper.CONFIG.S3Domain {
+		// Host style, like "bucketname.s3.test.com" .
+		if strings.HasSuffix(hostWithOutPort, "."+d) {
+			return true
+		}
+
+		// Path style, like "s3.test.com" .
+		if hostWithOutPort == d {
+			return true
+		}
+	}
+
+	return false
 }
