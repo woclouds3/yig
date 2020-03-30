@@ -21,6 +21,7 @@ import (
 const (
 	SCAN_HBASE_LIMIT    = 50
 	DEFAULT_LC_LOG_PATH = "/var/log/yig/lc.log"
+	DEFAULT_LC_SLEEP_INTERVAL_HOUR     = 1 //TODO 24
 )
 
 var (
@@ -29,7 +30,6 @@ var (
 	taskQ       chan types.LifeCycle
 	signalQueue chan os.Signal
 	waitgroup   sync.WaitGroup
-	empty       bool
 	stop        bool
 )
 
@@ -44,22 +44,25 @@ func getLifeCycles() {
 			return
 		}
 
+		helper.Logger.Info(nil, "ScanLifeCycle: marker: ", marker)
+
 		result, err := yig.MetaStorage.ScanLifeCycle(nil, SCAN_HBASE_LIMIT, marker)
 		if err != nil {
-			helper.Logger.Error(nil, "ScanLifeCycle failed", err)
-			signalQueue <- syscall.SIGQUIT
-			return
+			helper.Logger.Error(nil, "ScanLifeCycle failed, err: ", err, "Sleep and retry.")
+			time.Sleep(DEFAULT_LC_SLEEP_INTERVAL_HOUR * time.Hour)
+			continue
 		}
+
 		for _, entry := range result.Lcs {
 			taskQ <- entry
 			marker = entry.BucketName
 		}
 
 		if result.Truncated == false {
-			empty = true
-			return
+			marker = ""
+			helper.Logger.Info(nil, "Sleep after ScanLifeCycle returned len:", len(result.Lcs), "Truncated:", result.Truncated)
+			time.Sleep(DEFAULT_LC_SLEEP_INTERVAL_HOUR * time.Hour)
 		}
-
 	}
 
 }
@@ -203,23 +206,12 @@ func processLifecycle() {
 			helper.Logger.Info(nil, ".")
 			return
 		}
+
+		item := <-taskQ
 		waitgroup.Add(1)
-		select {
-		case item := <-taskQ:
-			err := retrieveBucket(item)
-			if err != nil {
-				helper.Logger.Error(nil, "[ERR] Bucket: ", item.BucketName, err)
-				waitgroup.Done()
-				continue
-			}
-			helper.Logger.Info(nil, "[DONE] Bucket:%s", item.BucketName)
-		default:
-			if empty == true {
-				helper.Logger.Info(nil, "all bucket lifecycle handle complete. QUIT")
-				signalQueue <- syscall.SIGQUIT
-				waitgroup.Done()
-				return
-			}
+		err := retrieveBucket(item)
+		if err != nil {
+			helper.Logger.Error(nil, "[ERR] Bucket: ", item.BucketName, err)
 		}
 		waitgroup.Done()
 	}
@@ -244,7 +236,7 @@ func main() {
 
 	numOfWorkers := helper.CONFIG.LcThread
 	helper.Logger.Info(nil, "start lc thread:", numOfWorkers)
-	empty = false
+
 	for i := 0; i < numOfWorkers; i++ {
 		go processLifecycle()
 	}
