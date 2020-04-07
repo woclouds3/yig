@@ -150,10 +150,12 @@ func (t *TidbClient) UpdateObjectAttrs(object *Object) error {
 func (t *TidbClient) UpdateAppendObject(o *Object, versionId string) (err error) {
 	rawVersionId, err := ConvertS3VersionToRawVersion(versionId)
 	if err != nil {
+		helper.Logger.Info(nil, "UpdataAppendObject", err)
 		return err
 	}
 	sql, args := o.GetAppendSql(rawVersionId)
 	_, err = t.Client.Exec(sql, args...)
+	helper.Logger.Info(nil, sql, args, err)
 	return err
 }
 

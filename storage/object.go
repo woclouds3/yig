@@ -644,6 +644,7 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 		initializationVector = objInfo.InitializationVector
 		objSize = objInfo.Size
 		storageClass = objInfo.StorageClass
+		oldVersionId = objInfo.VersionId
 		helper.Logger.Info(ctx, "request append oid:", oid, "iv:", initializationVector, "size:", objSize)
 	} else {
 		// New appendable object
