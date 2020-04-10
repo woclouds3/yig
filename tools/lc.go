@@ -95,16 +95,31 @@ func retrieveBucket(lc types.LifeCycle) error {
 	if err != nil {
 		return err
 	}
-	rules := bucket.LC.Rule
-	for _, rule := range rules {
-		if rule.Prefix == "" {
-			defaultConfig = true
-			defaultDays, err = strconv.Atoi(rule.Expiration)
-			if err != nil {
-				return err
+
+	// Filter only Enabled rules.
+	var rules []datatype.LcRule
+	for _, rule := range bucket.LC.Rule {
+		if rule.Status == "Enabled" {
+			if rule.Prefix == "" {
+				defaultConfig = true
+				defaultDays, err = strconv.Atoi(rule.Expiration)
+				if err != nil {
+					return err
+				}
 			}
+
+			rules = append(rules, rule)
 		}
 	}
+
+	if len(rules) == 0 {
+		helper.Logger.Info(nil, "no rules enabled for bucket:", bucket.Name, "return.")
+		return nil
+	}
+
+	// Lifecycle + Versioning: https://docs.aws.amazon.com/AmazonS3/latest/dev/intro-lifecycle-rules.html
+	// ListObjectsInternal() returns "" version, excluding DeleteMarker.
+	// DeleteObject() delete "" version, the same behavier as manual DELETE.
 	var request datatype.ListObjectsRequest
 	request.Versioned = false
 	request.MaxKeys = 1000
@@ -143,7 +158,7 @@ func retrieveBucket(lc types.LifeCycle) error {
 					if object.NullVersion {
 						object.VersionId = ""
 					}
-					_, err = yig.DeleteObject(nil, object.BucketName, object.Name, object.VersionId, common.Credential{})
+					_, err = yig.DeleteObject(nil, object.BucketName, object.Name, types.ObjectDefaultVersion, common.Credential{})
 					if err != nil {
 						helper.Logger.Error(nil, "[FAILED]", object.BucketName, object.Name, object.VersionId, err)
 						continue
@@ -176,7 +191,7 @@ func retrieveBucket(lc types.LifeCycle) error {
 				}
 				for _, object := range retObjects {
 					if checkIfExpiration(object.LastModifiedTime, days) {
-						_, err = yig.DeleteObject(nil, object.BucketName, object.Name, object.VersionId, common.Credential{})
+						_, err = yig.DeleteObject(nil, object.BucketName, object.Name, types.ObjectDefaultVersion, common.Credential{})
 						if err != nil {
 							helper.Logger.Error(nil, "failed to delete object:", object.Name, object.BucketName)
 							helper.Logger.Error(nil, "[FAILED]", object.BucketName, object.Name, object.VersionId, err)
