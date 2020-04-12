@@ -197,12 +197,21 @@ func (a *Client) GetCredential(accessKey string) (credential common.Credential, 
 	return credential, nil
 }
 
+func GetCorrectWocloudIamClient(url string) *circuitbreak.CircuitClient {
+	var c *circuitbreak.CircuitClient = nil
+	if strings.HasPrefix(url, "https") {
+		c = circuitbreak.NewCircuitClientWithInsecureSSL()
+	} else if strings.HasPrefix(url, "http") {
+		c = circuitbreak.NewCircuitClient()
+	}
+	return c
+}
+
 func GetWocloudIamClient(config map[string]interface{}) (interface{}, error) {
 
 	helper.Logger.Info(nil, "Get plugin config: \n", config)
-
 	c := &Client{
-		httpClient:  circuitbreak.NewCircuitClient(),
+		httpClient:  GetCorrectWocloudIamClient(config["iam_endpoint"].(string)),
 		iamEndpoint: config["iam_endpoint"].(string),
 		iamKey:      config["iam_key"].(string),
 		iamSecret:   config["iam_secret"].(string),
