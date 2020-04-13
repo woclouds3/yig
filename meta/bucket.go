@@ -37,7 +37,7 @@ func (m *Meta) GetBucket(ctx context.Context, bucketName string, willNeed bool) 
 	bucket, ok := b.(*types.Bucket)
 	if !ok {
 		helper.Logger.Error(ctx, "Cast b failed:", b)
-		err = ErrInternalError
+		err = errs.ErrInternalError
 		return
 	}
 	return bucket, nil
@@ -50,10 +50,10 @@ func (m *Meta) GetBuckets() (buckets []*types.Bucket, err error) {
 	bucketsInCache, err := m.Cache.Keys(redis.BucketTable, pattern)
 	if err != nil {
 		// failed to get buckets from cache, try to get them from db.
-		helper.Logger.Printf(5, "failed to get bucket usage from cache, err: %v", err)
+		helper.Logger.Error(nil, fmt.Sprintf("failed to get bucket usage from cache, err: %v", err))
 		buckets, err = m.Client.GetBuckets()
 		if err != nil {
-			helper.Logger.Printf(5, "failed to get bucket usage from db, err: %v", err)
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get bucket usage from db, err: %v", err))
 			return nil, err
 		}
 		return buckets, nil
@@ -67,13 +67,13 @@ func (m *Meta) GetBuckets() (buckets []*types.Bucket, err error) {
 		}
 		cacheElems, err := m.Cache.HGetAll(redis.BucketTable, BUCKET_CACHE_PREFIX, name)
 		if err != nil {
-			helper.Logger.Printf(2, "failed to get buckets info for bucket: %s, err: %v", name, err)
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get buckets info for bucket: %s, err: %v", name, err))
 			continue
 		}
 		bu := &types.Bucket{}
 		_, err = bu.Deserialize(cacheElems)
 		if err != nil {
-			helper.Logger.Printf(2, "failed to deserialize the bucket info for bucket: %s, err: %v", name, err)
+			helper.Logger.Error(nil, fmt.Sprintf("failed to deserialize the bucket info for bucket: %s, err: %v", name, err))
 			continue
 		}
 		buckets = append(buckets, bu)
