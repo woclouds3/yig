@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	FIELD_NAME_BODY  = "body"
-	FIELD_NAME_USAGE = "usage"
+	FIELD_NAME_BODY   = "body"
+	FIELD_NAME_USAGE  = "usage"
+	FIELD_NAME_POLICY = "policy"
 )
 
 const (
@@ -44,12 +45,22 @@ type Bucket struct {
 // implements the Serializable interface
 func (b *Bucket) Serialize() (map[string]interface{}, error) {
 	fields := make(map[string]interface{})
+	pjson, err := b.Policy.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	oriPolicy := b.Policy
+	defer func() {
+		b.Policy = oriPolicy
+	}()
+	b.Policy = policy.Policy{}
 	bytes, err := helper.MsgPackMarshal(b)
 	if err != nil {
 		return nil, err
 	}
 	fields[FIELD_NAME_BODY] = string(bytes)
 	fields[FIELD_NAME_USAGE] = b.Usage
+	fields[FIELD_NAME_POLICY] = string(pjson)
 	return fields, nil
 }
 
@@ -65,6 +76,12 @@ func (b *Bucket) Deserialize(fields map[string]string) (interface{}, error) {
 	}
 	if usageStr, ok := fields[FIELD_NAME_USAGE]; ok {
 		b.Usage, err = strconv.ParseInt(usageStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if pjson, ok := fields[FIELD_NAME_POLICY]; ok {
+		err = b.Policy.UnmarshalJSON([]byte(pjson))
 		if err != nil {
 			return nil, err
 		}
