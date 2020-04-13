@@ -49,6 +49,10 @@ func (b *Bucket) Serialize() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	oriPolicy := b.Policy
+	defer func() {
+		b.Policy = oriPolicy
+	}()
 	b.Policy = policy.Policy{}
 	bytes, err := helper.MsgPackMarshal(b)
 	if err != nil {
