@@ -3,6 +3,7 @@ package main
 import (
 	"sync"
 
+	"github.com/journeymidnight/yig/helper"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -46,7 +47,7 @@ func (c *Metrics) Collect(ch chan<- prometheus.Metric) {
 func (c *Metrics) GenerateUsageData() (GaugeMetricData map[string]UsageData) {
 	buckets, err := adminServer.Yig.MetaStorage.GetBuckets()
 	if err != nil {
-		adminServer.Yig.Logger.Println(5, "get usage data for prometheus failed:", err.Error())
+		helper.Logger.Error(nil, "get usage data for prometheus failed:", err.Error())
 		return
 	}
 	GaugeMetricData = make(map[string]UsageData)

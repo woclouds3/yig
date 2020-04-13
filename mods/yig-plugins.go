@@ -33,15 +33,15 @@ func InitialPlugins() map[string]*YigPlugin {
 
 	for name, pluginConfig := range helper.CONFIG.Plugins {
 		sopath = pluginConfig.Path
-		helper.Logger.Printf(5, "plugins: open for %s\n", name)
+		helper.Logger.Info(nil, "plugins: open for", name)
 		if pluginConfig.Path == "" {
-			helper.Logger.Printf(5, "plugin path for %s is empty\n", name)
+			helper.Logger.Error(nil, "plugin path for is empty", name)
 			continue
 		}
 
 		//if enable do not exist in toml file, enable's default is false
 		if pluginConfig.Enable == false {
-			helper.Logger.Printf(5, "plugins: %s is not enabled, continue\n", sopath)
+			helper.Logger.Error(nil, "plugins: is not enabled, continue", sopath)
 			continue
 		}
 
@@ -53,14 +53,14 @@ func InitialPlugins() map[string]*YigPlugin {
 		}
 		exported, err := plug.Lookup(EXPORTED_PLUGIN)
 		if err != nil {
-			helper.Logger.Printf(5, "plugins: lookup %s in %s failed, err: %v\n", EXPORTED_PLUGIN, sopath, err)
+			helper.Logger.Error(nil, "plugins: lookup failed, err: ", EXPORTED_PLUGIN, sopath, err)
 			continue
 		}
 
 		//check plugin type
 		yigPlugin, ok := exported.(*YigPlugin)
 		if !ok {
-			helper.Logger.Printf(5, "plugins: convert %s in %s failed, exported: %v\n", EXPORTED_PLUGIN, sopath, exported)
+			helper.Logger.Error(nil, "plugins: convert failed, exported:\n", EXPORTED_PLUGIN, sopath, exported)
 			continue
 		}
 
@@ -68,10 +68,10 @@ func InitialPlugins() map[string]*YigPlugin {
 		if yigPlugin.Name == name && yigPlugin.Create != nil {
 			globalPlugins[yigPlugin.Name] = yigPlugin
 		} else {
-			helper.Logger.Printf(5, "plugins: check %s failed, value: %v\n", sopath, yigPlugin)
+			helper.Logger.Error(nil, "plugins: check failed, value:", sopath, yigPlugin)
 			continue
 		}
-		helper.Logger.Printf(10, "plugins: loaded plugin %s from %s\n", yigPlugin.Name, sopath)
+		helper.Logger.Info(nil, "plugins: loaded plugin from", yigPlugin.Name, sopath)
 	}
 
 	return globalPlugins

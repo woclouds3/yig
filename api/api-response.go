@@ -20,6 +20,8 @@ import (
 	"encoding/xml"
 	"net/http"
 	"path"
+	"runtime"
+	"strings"
 	"time"
 
 	"net/url"
@@ -241,7 +243,15 @@ func WriteErrorResponseHeaders(w http.ResponseWriter, r *http.Request, err error
 	} else {
 		status = http.StatusInternalServerError
 	}
-	helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "Response status code:", status, "err:", err)
+
+	_, fullPath, line, ok := runtime.Caller(2)
+	var file string
+	if ok {
+		fileParts := strings.Split(fullPath, "/")
+		file = fileParts[len(fileParts)-1]
+	}
+
+	helper.Logger.Error(r.Context(), "Response status code:", status, "err:", err, "Caller: ", file, "line", line)
 
 	//ResponseRecorder
 	w.(*ResponseRecorder).status = status

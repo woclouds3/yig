@@ -18,6 +18,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -35,9 +36,9 @@ import (
 
 type ServerConfig struct {
 	Address      string
-	KeyFilePath  string      // path for SSL key file
-	CertFilePath string      // path for SSL certificate file
-	Logger       *log.Logger // global logger
+	KeyFilePath  string     // path for SSL key file
+	CertFilePath string     // path for SSL certificate file
+	Logger       log.Logger // global logger
 	ObjectLayer  *storage.YigStorage
 }
 
@@ -128,9 +129,9 @@ func getListenIPs(httpServerConf *http.Server) (hosts []string, port string) {
 func printListenIPs(tls bool, hosts []string, port string) {
 	for _, host := range hosts {
 		if tls {
-			logger.Printf(5, "    https://%s:%s\n", host, port)
+			helper.Logger.Info(nil, fmt.Sprintf("https://%s:%s", host, port))
 		} else {
-			logger.Printf(5, "    http://%s:%s\n", host, port)
+			helper.Logger.Info(nil, fmt.Sprintf("https://%s:%s", host, port))
 		}
 	}
 }
@@ -245,7 +246,7 @@ func startApiServer(c *ServerConfig) {
 	hosts, port := getListenIPs(apiServer.Server) // get listen ips and port.
 	tls := apiServer.Server.TLSConfig != nil      // 'true' if TLS is enabled.
 
-	logger.Println(5, "\nS3 Object Storage:")
+	helper.Logger.Info(nil, "S3 Object Storage:")
 	// Print api listen ips.
 	printListenIPs(tls, hosts, port)
 

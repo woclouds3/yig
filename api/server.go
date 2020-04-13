@@ -20,6 +20,5 @@ type Server struct {
 }
 
 func (s *Server) Stop() {
-	helper.Logger.Print(5, "Stopping API server...")
-	helper.Logger.Println(5, "done")
+	helper.Logger.Info(nil, "Server stopped")
 }

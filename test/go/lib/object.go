@@ -29,6 +29,19 @@ func (s3client *S3Client) PutObject(bucketName, key, value string) (err error) {
 	return
 }
 
+func (s3client *S3Client) PutObjectVersioning(bucketName, key, value string) (versionId string, err error) {
+	params := &s3.PutObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader([]byte(value)),
+	}
+	output, err := s3client.Client.PutObject(params)
+	if err != nil {
+		return "", err
+	}
+	return aws.StringValue(output.VersionId), nil
+}
+
 func (s3client *S3Client) PutObjectPreSignedWithSpecifiedBody(bucketName, key, value string, expire time.Duration) (url string, err error) {
 	params := &s3.PutObjectInput{
 		Bucket: aws.String(bucketName),
@@ -94,6 +107,19 @@ func (s3client *S3Client) DeleteObject(bucketName, key string) (err error) {
 	params := &s3.DeleteObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(key),
+	}
+	_, err = s3client.Client.DeleteObject(params)
+	if err != nil {
+		return err
+	}
+	return
+}
+
+func (s3client *S3Client) DeleteObjectVersion(bucketName, key, versionId string) (err error) {
+	params := &s3.DeleteObjectInput{
+		Bucket:    aws.String(bucketName),
+		Key:       aws.String(key),
+		VersionId: aws.String(versionId),
 	}
 	_, err = s3client.Client.DeleteObject(params)
 	if err != nil {

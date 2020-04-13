@@ -62,7 +62,7 @@ func getStorageClassFromHeader(r *http.Request) (meta.StorageClass, error) {
 	storageClassStr := r.Header.Get("X-Amz-Storage-Class")
 
 	if storageClassStr != "" {
-		helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]",
+		helper.Logger.Info(r.Context(),
 			"Get storage class header:", storageClassStr)
 		return meta.MatchStorageClassIndex(storageClassStr)
 	} else {
@@ -376,7 +376,7 @@ func (api ObjectAPIHandlers) HeadObjectHandler(w http.ResponseWriter, r *http.Re
 // This implementation of the PUT operation adds an object to a bucket
 // while reading the object from another source.
 func (api ObjectAPIHandlers) CopyObjectHandler(w http.ResponseWriter, r *http.Request) {
-	helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "CopyObjectHandler enter")
+	helper.Logger.Info(r.Context(), "CopyObjectHandler enter")
 	vars := mux.Vars(r)
 	targetBucketName := vars["bucket"]
 	targetObjectName := vars["object"]
@@ -447,7 +447,7 @@ func (api ObjectAPIHandlers) CopyObjectHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]",
+	helper.Logger.Info(r.Context(),
 		"sourceBucketName", sourceBucketName, "sourceObjectName", sourceObjectName,
 		"sourceVersion", sourceVersion)
 
@@ -616,7 +616,7 @@ func (api ObjectAPIHandlers) CopyObjectHandler(w http.ResponseWriter, r *http.Re
 // ----------
 // This implementation of the PUT operation adds an object to a bucket.
 func (api ObjectAPIHandlers) PutObjectHandler(w http.ResponseWriter, r *http.Request) {
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "PutObjectHandler", "enter")
+	helper.Logger.Info(r.Context(), "PutObjectHandler", "enter")
 	// If the matching failed, it means that the X-Amz-Copy-Source was
 	// wrong, fail right here.
 	if _, ok := r.Header["X-Amz-Copy-Source"]; ok {
@@ -674,13 +674,13 @@ func (api ObjectAPIHandlers) PutObjectHandler(w http.ResponseWriter, r *http.Req
 		metadata["md5Sum"] = ""
 	} else {
 		if len(r.Header.Get("Content-Md5")) == 0 {
-			helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Content Md5 is null!")
+			helper.Logger.Info(r.Context(), "Content Md5 is null!")
 			WriteErrorResponse(w, r, ErrInvalidDigest)
 			return
 		}
 		md5Bytes, err := checkValidMD5(r.Header.Get("Content-Md5"))
 		if err != nil {
-			helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Content Md5 is invalid!")
+			helper.Logger.Info(r.Context(), "Content Md5 is invalid!")
 			WriteErrorResponse(w, r, ErrInvalidDigest)
 			return
 		} else {
@@ -765,7 +765,7 @@ func (api ObjectAPIHandlers) PutObjectHandler(w http.ResponseWriter, r *http.Req
 // ----------
 // This implementation of the POST operation append an object in a bucket.
 func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.Request) {
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "AppendObjectHandler", "enter")
+	helper.Logger.Info(r.Context(), "AppendObjectHandler", "enter")
 
 	vars := mux.Vars(r)
 	bucketName := vars["bucket"]
@@ -830,15 +830,13 @@ func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.
 		metadata["md5Sum"] = ""
 	} else {
 		if len(r.Header.Get("Content-Md5")) == 0 {
-			helper.Debugln("[", RequestIdFromContext(r.Context()), "]",
-				"Content Md5 is null!")
+			helper.Logger.Info(r.Context(), "Content Md5 is null!")
 			WriteErrorResponse(w, r, ErrInvalidDigest)
 			return
 		}
 		md5Bytes, err := checkValidMD5(r.Header.Get("Content-Md5"))
 		if err != nil {
-			helper.Debugln("[", RequestIdFromContext(r.Context()), "]",
-				"Content Md5 is invalid!")
+			helper.Logger.Info(r.Context(), "Content Md5 is invalid!")
 			WriteErrorResponse(w, r, ErrInvalidDigest)
 			return
 		} else {
@@ -881,14 +879,13 @@ func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if objInfo != nil && objInfo.Type != meta.ObjectTypeAppendable {
+	if objInfo != nil && (objInfo.Type != meta.ObjectTypeAppendable || objInfo.DeleteMarker) {
 		WriteErrorResponse(w, r, ErrObjectNotAppendable)
 		return
 	}
 
 	if objInfo != nil && objInfo.Size != int64(position) {
-		helper.Debugln("[", RequestIdFromContext(r.Context()), "]",
-			"Current Size:", objInfo.Size, "Position:", position)
+		helper.Logger.Info(r.Context(), "Current Size:", objInfo.Size, "Position:", position)
 		w.Header().Set("X-Amz-Next-Append-Position", strconv.FormatInt(objInfo.Size, 10))
 		WriteErrorResponse(w, r, ErrPositionNotEqualToLength)
 		return
@@ -986,7 +983,7 @@ func (api ObjectAPIHandlers) PutObjectAclHandler(w http.ResponseWriter, r *http.
 		}
 	} else {
 		aclBuffer, err := ioutil.ReadAll(io.LimitReader(r.Body, 1024))
-		helper.Debug("[ %s ] acl body:\n %s", RequestIdFromContext(r.Context()), string(aclBuffer))
+		helper.Logger.Info(r.Context(), "acl body:", string(aclBuffer))
 		if err != nil {
 			helper.ErrorIf(err, "Unable to read acls body")
 			WriteErrorResponse(w, r, ErrInvalidAcl)
@@ -1677,12 +1674,12 @@ func (api ObjectAPIHandlers) PostObjectHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "formValues", formValues)
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "bucket", bucketName)
+	helper.Logger.Info(r.Context(), "formValues", formValues)
+	helper.Logger.Info(r.Context(), "bucket", bucketName)
 
 	var credential common.Credential
 	postPolicyType := signature.GetPostPolicyType(formValues)
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "type", postPolicyType)
+	helper.Logger.Info(r.Context(), "type", postPolicyType)
 	switch postPolicyType {
 	case signature.PostPolicyV2:
 		credential, err = signature.DoesPolicySignatureMatchV2(formValues)
