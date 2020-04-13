@@ -1,6 +1,7 @@
 package mods
 
 import (
+	"fmt"
 	"plugin"
 
 	"github.com/journeymidnight/yig/helper"
@@ -48,7 +49,7 @@ func InitialPlugins() map[string]*YigPlugin {
 		//open plugin file
 		plug, err := plugin.Open(sopath)
 		if err != nil {
-			helper.Logger.Error(nil, "plugins: failed to open", sopath, "for", name)
+			helper.Logger.Error(nil, fmt.Sprintf("plugins: failed to open %s for %s, err: %v", sopath, name, err))
 			continue
 		}
 		exported, err := plug.Lookup(EXPORTED_PLUGIN)

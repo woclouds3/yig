@@ -23,6 +23,11 @@ func (t *TidbClient) GetUserBuckets(userId string) (buckets []string, err error)
 		}
 		buckets = append(buckets, tmp)
 	}
+	// must check the errors after rows.Next() function call.
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
 	return
 }
 

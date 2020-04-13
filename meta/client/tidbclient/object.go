@@ -124,6 +124,10 @@ func (t *TidbClient) GetAllObject(bucketName, objectName, version string) (objec
 		}
 		versions = append(versions, iversion)
 	}
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
 	for _, v := range versions {
 		var obj *Object
 		obj, err = t.GetObject(bucketName, objectName, ConvertRawVersionToS3Version(v))
@@ -243,6 +247,10 @@ func getParts(bucketName, objectName string, version uint64, cli *sql.DB) (parts
 			&p.InitializationVector,
 		)
 		parts[p.PartNumber] = p
+	}
+	err = rows.Err()
+	if err != nil {
+		return nil, err
 	}
 	return
 }
