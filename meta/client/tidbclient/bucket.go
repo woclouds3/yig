@@ -338,7 +338,7 @@ func (t *TidbClient) ListObjects(ctx context.Context, bucketName, marker, verIdM
 			// Looped all the versions in the marker.
 			// Start from next object name.
 			helper.Logger.Info(ctx, "Looped all the versions for", bucketName, marker, rawVersionIdMarker)
-			
+
 			if !exit && rawVersionIdMarker != "" {
 				rawVersionIdMarker = ""
 				continue
@@ -389,7 +389,7 @@ func (t *TidbClient) UpdateUsage(bucketName string, size int64, tx interface{}) 
 	return
 }
 
-func (t *TidbClient) UpdateUsages(usages map[string]int64, tx interface{}) error {
+func (t *TidbClient) UpdateBucketInfo(usages map[string]*BucketInfo, tx interface{}) error {
 	var sqlTx *sql.Tx
 	var err error
 	if nil == tx {
@@ -403,18 +403,20 @@ func (t *TidbClient) UpdateUsages(usages map[string]int64, tx interface{}) error
 		}()
 	}
 	sqlTx, _ = tx.(*sql.Tx)
-	sqlStr := "update buckets set usages = ? where bucketname = ?;"
+	sqlStr := "update buckets set usages = ?, fileNum = ? where bucketname = ?;"
 	st, err := sqlTx.Prepare(sqlStr)
 	if err != nil {
-		helper.Logger.Println(2, "failed to prepare statment with sql: ", sqlStr, ", err: ", err)
+		helper.Logger.Error(nil, fmt.Sprintf("UpdateBucketInfo: failed to prepare statement: %s, err: %v",
+			sqlStr, err))
 		return err
 	}
 	defer st.Close()
 
-	for bucket, usage := range usages {
-		_, err = st.Exec(usage, bucket)
+	for bucket, info := range usages {
+		_, err = st.Exec(info.Usage, info.FileNum, bucket)
 		if err != nil {
-			helper.Logger.Println(2, "failed to update usage for bucket: ", bucket, " with usage: ", usage, ", err: ", err)
+			helper.Logger.Error(nil, fmt.Sprintf("UpdateBucketInfo: failed to update bucket info for bucket %s, with usage: %d, fileNum: %d, err: %v",
+				bucket, info.Usage, info.FileNum, err))
 			return err
 		}
 	}
