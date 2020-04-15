@@ -313,6 +313,7 @@ var notimplementedBucketResourceNames = map[string]bool{
 // List of not implemented object queries
 var notimplementedObjectResourceNames = map[string]bool{
 	"torrent": true,
+	"tagging": true,
 }
 
 func GetBucketAndObjectInfoFromRequest(r *http.Request) (bucketName string, objectName string, isBucketDomain bool) {

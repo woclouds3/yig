@@ -918,7 +918,7 @@ func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if objInfo != nil && objInfo.Type != meta.ObjectTypeAppendable {
+	if objInfo != nil && (objInfo.Type != meta.ObjectTypeAppendable || objInfo.DeleteMarker) {
 		WriteErrorResponse(w, r, ErrObjectNotAppendable)
 		return
 	}

@@ -429,8 +429,9 @@ func (yig *YigStorage) DeleteBucket(ctx context.Context, bucketName string, cred
 	}
 
 	// Check if bucket is empty
-	objs, _, _, _, _, err := yig.MetaStorage.Client.ListObjects(ctx, bucketName, "", "", "", "", false, 1)
+	objs, _, _, _, _, err := yig.MetaStorage.Client.ListObjects(ctx, bucketName, "", "", "", "", false, 1, true)
 	if err != nil {
+		yig.Logger.Error(ctx, err)
 		return err
 	}
 	if len(objs) != 0 {
@@ -464,10 +465,22 @@ func (yig *YigStorage) DeleteBucket(ctx context.Context, bucketName string, cred
 	return nil
 }
 
+// Without delete-marker.
 func (yig *YigStorage) ListObjectsInternal(ctx context.Context, bucketName string,
 	request datatype.ListObjectsRequest) (retObjects []*types.Object, prefixes []string, truncated bool,
 	nextMarker, nextVerIdMarker string, err error) {
+	return yig.ListObjectsInternalCore(ctx, bucketName, request, false)
+}
 
+func (yig *YigStorage) ListObjectsInternalWithDeleteMarker(ctx context.Context, bucketName string,
+	request datatype.ListObjectsRequest) (retObjects []*types.Object, prefixes []string, truncated bool,
+	nextMarker, nextVerIdMarker string, err error) {
+	return yig.ListObjectsInternalCore(ctx, bucketName, request, true)
+}
+
+func (yig *YigStorage) ListObjectsInternalCore(ctx context.Context, bucketName string,
+	request datatype.ListObjectsRequest, withDeleteMarker bool) (retObjects []*types.Object, prefixes []string, truncated bool,
+	nextMarker, nextVerIdMarker string, err error) {
 	var marker string
 	var verIdMarker string
 	if request.Versioned {
@@ -488,8 +501,9 @@ func (yig *YigStorage) ListObjectsInternal(ctx context.Context, bucketName strin
 	}
 	yig.Logger.Info(ctx, "Prefix:", request.Prefix, "Marker:", request.Marker, "MaxKeys:",
 		request.MaxKeys, "Delimiter:", request.Delimiter, "Version:", request.Version,
-		"keyMarker:", request.KeyMarker, "versionIdMarker:", request.VersionIdMarker)
-	return yig.MetaStorage.Client.ListObjects(ctx, bucketName, marker, verIdMarker, request.Prefix, request.Delimiter, request.Versioned, request.MaxKeys)
+		"keyMarker:", request.KeyMarker, "versionIdMarker:", request.VersionIdMarker,
+		"withDeleteMarker", withDeleteMarker)
+	return yig.MetaStorage.Client.ListObjects(ctx, bucketName, marker, verIdMarker, request.Prefix, request.Delimiter, request.Versioned, request.MaxKeys, withDeleteMarker)
 }
 
 func (yig *YigStorage) ListObjects(ctx context.Context, credential common.Credential, bucketName string,
@@ -590,7 +604,7 @@ func (yig *YigStorage) ListVersionedObjects(ctx context.Context, credential comm
 		}
 	}
 
-	retObjects, prefixes, truncated, nextMarker, nextVerIdMarker, err := yig.ListObjectsInternal(ctx, bucketName, request)
+	retObjects, prefixes, truncated, nextMarker, nextVerIdMarker, err := yig.ListObjectsInternalWithDeleteMarker(ctx, bucketName, request)
 	if truncated && len(nextMarker) != 0 {
 		result.NextKeyMarker = nextMarker
 		result.NextVersionIdMarker = nextVerIdMarker
@@ -638,6 +652,8 @@ func (yig *YigStorage) ListVersionedObjects(ctx context.Context, credential comm
 		})
 		result.NextKeyMarker = url.QueryEscape(result.NextKeyMarker)
 	}
+
+	helper.Logger.Info(ctx, "ListVersionedObjects result:", len(result.Objects), result.IsTruncated, result.NextKeyMarker, result.NextVersionIdMarker, )
 
 	return
 }
