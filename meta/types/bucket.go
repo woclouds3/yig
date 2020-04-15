@@ -180,6 +180,7 @@ func (b Bucket) GetCreateSql() (string, []interface{}) {
 }
 
 type BucketInfo struct {
-	Usage   int64
-	FileNum int64
+	BucketName string
+	Usage      int64
+	FileNum    int64
 }

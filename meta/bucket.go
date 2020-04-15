@@ -182,11 +182,36 @@ func (m *Meta) InitBucketUsageCache() error {
 			if len(elems) > 0 {
 				name = elems[1]
 			}
+			exists, err := m.Cache.HExists(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_USAGE)
+			if err != nil {
+				helper.Logger.Error(nil, fmt.Sprintf("failed to hexists for bucket(%s), field(%s), err: %v",
+					name, types.FIELD_NAME_USAGE, err))
+				continue
+			}
+
+			if !exists {
+				helper.Logger.Info(nil, fmt.Sprintf("bucket(%s), field(%s) is not in cache.", name, types.FIELD_NAME_USAGE))
+				continue
+			}
+			exists, err = m.Cache.HExists(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_FILE_NUM)
+			if err != nil {
+				helper.Logger.Error(nil, fmt.Sprintf("failed to hexists for bucket(%s), field(%s), err: %v",
+					name, types.FIELD_NAME_FILE_NUM, err))
+				continue
+			}
+
+			if !exists {
+				helper.Logger.Info(nil, fmt.Sprintf("bucket(%s), field(%s) is not in cache.",
+					name, types.FIELD_NAME_FILE_NUM))
+				continue
+			}
+
 			usage, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_USAGE)
 			if err != nil {
 				helper.Logger.Error(nil, fmt.Sprintf("failed to get usage for bucket: ", name, " with err: ", err))
 				continue
 			}
+
 			fileNum, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_FILE_NUM)
 			if err != nil {
 				helper.Logger.Error(nil, fmt.Sprintf("failed to get fileNum for bucket: %s, err: %v", name, err))
@@ -207,7 +232,19 @@ func (m *Meta) InitBucketUsageCache() error {
 
 	// init the bucket usage in cache.
 	if len(bucketUsageMap) > 0 {
+		// query fileNum & usages from db.
+		// below query will take some time.
+		infos, err := m.Client.GetAllBucketInfo()
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get all bucket info from db, err: %v", err))
+			return err
+		}
 		for _, bk := range bucketUsageMap {
+			//set the correct fileNum according to above infos.
+			if bi, ok := infos[bk.Name]; ok {
+				bk.FileNum = bi.FileNum
+				bk.Usage = bi.Usage
+			}
 			fields, err := bk.Serialize()
 			if err != nil {
 				helper.Logger.Error(nil, fmt.Sprintf("failed to serialize for bucket: ", bk.Name, " with err: ", err))

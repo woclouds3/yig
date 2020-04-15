@@ -367,6 +367,21 @@ func HMGet(table RedisDatabase, prefix, key string, fields []string) (map[string
 	return r, nil
 }
 
+func HExists(table RedisDatabase, prefix, key string, field string) (bool, error) {
+	c, err := GetClient()
+	if err != nil {
+		helper.Logger.Error(nil, fmt.Sprintf("failed to get redis client, err: %v", err))
+		return false, err
+	}
+	exists, err := c.HExists(table.String()+prefix+helper.EscapeColon(key), field)
+	if err != nil {
+		helper.Logger.Error(nil, fmt.Sprintf("failed to call redis hexists(%s, %s), err: %v"),
+			table.String()+prefix+helper.EscapeColon(key), err)
+		return false, err
+	}
+	return exists, nil
+}
+
 // Publish the invalid message to other YIG instances through Redis
 func Invalid(table RedisDatabase, key string) (err error) {
 	c, err := GetClient()

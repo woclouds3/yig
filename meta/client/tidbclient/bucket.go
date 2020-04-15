@@ -422,3 +422,34 @@ func (t *TidbClient) UpdateBucketInfo(usages map[string]*BucketInfo, tx interfac
 	}
 	return nil
 }
+
+func (t *TidbClient) GetAllBucketInfo() (map[string]*BucketInfo, error) {
+	query := "select bucketname, count(objectid) as fileNum, sum(size) as usages from objects group by bucketname;"
+	rows, err := t.Client.Query(query)
+	if err != nil {
+		helper.Logger.Error(nil, fmt.Sprintf("failed to query(%s), err: %v", query, err))
+		return nil, err
+	}
+
+	infos := make(map[string]*BucketInfo)
+	defer rows.Close()
+	for rows.Next() {
+		bi := &BucketInfo{}
+		err = rows.Scan(
+			&bi.BucketName,
+			&bi.FileNum,
+			&bi.Usage,
+		)
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to scan for query(%s), err: %v", query, err))
+			return nil, err
+		}
+		infos[bi.BucketName] = bi
+	}
+	err = rows.Err()
+	if err != nil {
+		helper.Logger.Error(nil, fmt.Sprintf("failed to iterator rows for query(%s), err: %v", query, err))
+		return nil, err
+	}
+	return infos, nil
+}
