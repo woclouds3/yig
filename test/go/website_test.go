@@ -89,7 +89,7 @@ var testUnits = []WebsiteTestUnit{
 		Fn: doGet,
 		Cases: []Case{
 			{"http://" + TEST_BUCKET + "." + Endpoint, 200, testIndexHTML, false},
-			{"http://" + TEST_BUCKET + "." + Endpoint + "/aaa.txt", 404, testErrorHTML, false},
+			{"http://" + TEST_BUCKET + "." + Endpoint + "/aaa.txt", 403, testErrorHTML, false},
 		},
 	},
 	// Configure bucket as a website but redirect all requests
@@ -137,7 +137,7 @@ var testUnits = []WebsiteTestUnit{
 			ErrorDocument: &s3.ErrorDocument{Key: aws.String("error.html")},
 			RoutingRules: []*s3.RoutingRule{
 				{
-					Condition: &s3.Condition{HttpErrorCodeReturnedEquals: aws.String("404")},
+					Condition: &s3.Condition{HttpErrorCodeReturnedEquals: aws.String("403")},
 					Redirect: &s3.Redirect{
 						HostName:             aws.String(TEST_BUCKET + ".s3-internal.test.com:8080"),
 						ReplaceKeyPrefixWith: aws.String("docs/"),

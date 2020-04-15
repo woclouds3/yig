@@ -199,6 +199,7 @@ func (api ObjectAPIHandlers) HandledByWebsite(w http.ResponseWriter, r *http.Req
 
 		// handle IndexDocument
 		if strings.HasSuffix(ctx.ObjectName, "/") || ctx.ObjectName == "" {
+			helper.Logger.Info(r.Context(), "handle index document:", ctx.ObjectName)
 			indexName := ctx.ObjectName + id.Suffix
 			credential := common.Credential{}
 			isAllow, err := IsBucketPolicyAllowed(credential.UserId, ctx.BucketInfo, r, policy.GetObjectAction, indexName)
@@ -267,7 +268,7 @@ func (api ObjectAPIHandlers) ReturnWebsiteErrorDocument(w http.ResponseWriter, r
 		credential.AllowOtherUserAccess = isAllow
 		index, err := api.ObjectAPI.GetObjectInfo(r.Context(), ctx.BucketName, indexName, "", credential)
 		if err != nil {
-			helper.Logger.Error(r.Context(), "GetObjectInfo failed for:", ctx.BucketName, indexName, err)
+			helper.Logger.Error(r.Context(), "GetObjectInfo failed for:", ctx.BucketName, indexName, err, isAllow)
 			return false
 		}
 
