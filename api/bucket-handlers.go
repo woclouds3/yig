@@ -128,6 +128,8 @@ func (api ObjectAPIHandlers) ListObjectsHandler(w http.ResponseWriter, r *http.R
 	var credential common.Credential
 	var err error
 
+	helper.Logger.Info(r.Context(), "ListObjectsHandler")
+
 	if api.HandledByWebsite(w, r) {
 		return
 	}

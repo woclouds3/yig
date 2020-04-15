@@ -91,7 +91,7 @@ func (rr RoutingRule) DoRedirect(w http.ResponseWriter, r *http.Request, objectN
 	if hostName == "" {
 		hostName = r.Host
 	}
-	code := http.StatusFound
+	code := http.StatusMovedPermanently
 	if rd.HttpRedirectCode != "" {
 		code, _ = strconv.Atoi(rd.HttpRedirectCode)
 	}
@@ -100,6 +100,7 @@ func (rr RoutingRule) DoRedirect(w http.ResponseWriter, r *http.Request, objectN
 	} else if rd.ReplaceKeyPrefixWith != "" {
 		objectName = rd.ReplaceKeyPrefixWith + strings.TrimPrefix(objectName, rr.Condition.KeyPrefixEquals)
 	}
+	helper.Logger.Info(r.Context(), "DoRedirect:", protocol+"://"+hostName+"/"+objectName, code)
 	http.Redirect(w, r, protocol+"://"+hostName+"/"+objectName, code)
 	return
 }

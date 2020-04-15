@@ -15,7 +15,7 @@ import (
 )
 
 func (api ObjectAPIHandlers) PutBucketWebsiteHandler(w http.ResponseWriter, r *http.Request) {
-	helper.Logger.Info(nil, "PutBucketWebsiteHandler", "enter")
+	helper.Logger.Info(r.Context(), "PutBucketWebsiteHandler", "enter")
 	ctx := getRequestContext(r)
 
 	var credential common.Credential
@@ -58,7 +58,7 @@ func (api ObjectAPIHandlers) PutBucketWebsiteHandler(w http.ResponseWriter, r *h
 
 	err = api.ObjectAPI.SetBucketWebsite(ctx.BucketInfo, *websiteConfig)
 	if err != nil {
-		helper.Logger.Error(nil, err, "Unable to set website for bucket.")
+		helper.Logger.Error(r.Context(), err, "Unable to set website for bucket.")
 		WriteErrorResponse(w, r, err)
 		return
 	}
@@ -66,7 +66,7 @@ func (api ObjectAPIHandlers) PutBucketWebsiteHandler(w http.ResponseWriter, r *h
 }
 
 func (api ObjectAPIHandlers) GetBucketWebsiteHandler(w http.ResponseWriter, r *http.Request) {
-	helper.Logger.Info(nil, "GetBucketWebsiteHandler", "enter")
+	helper.Logger.Info(r.Context(), "GetBucketWebsiteHandler", "enter")
 	ctx := getRequestContext(r)
 
 	var credential common.Credential
@@ -104,7 +104,7 @@ func (api ObjectAPIHandlers) GetBucketWebsiteHandler(w http.ResponseWriter, r *h
 
 	encodedSuccessResponse, err := xmlFormat(bucketWebsite)
 	if err != nil {
-		helper.Logger.Info(nil, err, "Failed to marshal Website XML for bucket", ctx.BucketInfo.Name)
+		helper.Logger.Info(r.Context(), err, "Failed to marshal Website XML for bucket", ctx.BucketInfo.Name)
 		WriteErrorResponse(w, r, ErrInternalError)
 		return
 	}
@@ -159,10 +159,12 @@ func (api ObjectAPIHandlers) HandledByWebsite(w http.ResponseWriter, r *http.Req
 	if ctx.AuthType != signature.AuthTypeAnonymous {
 		return false
 	}
+	helper.Logger.Info(r.Context(), "HandledByWebsite enter:", ctx.BucketName, ctx.ObjectName)
 
 	website := ctx.BucketInfo.Website
 	// redirect
 	if redirect := website.RedirectAllRequestsTo; redirect != nil && redirect.HostName != "" {
+		helper.Logger.Info(r.Context(), "RedirectAllRequestsTo:", redirect.HostName, redirect.Protocol)
 		if !ctx.IsBucketDomain {
 			WriteErrorResponse(w, r, ErrSecondLevelDomainForbidden)
 			return true
@@ -171,7 +173,10 @@ func (api ObjectAPIHandlers) HandledByWebsite(w http.ResponseWriter, r *http.Req
 		if protocol == "" {
 			protocol = helper.Ternary(r.URL.Scheme == "", "http", r.URL.Scheme).(string)
 		}
-		http.Redirect(w, r, protocol+"://"+redirect.HostName+r.RequestURI, http.StatusFound)
+
+		helper.Logger.Info(r.Context(), "Redirect to:", protocol+"://"+redirect.HostName+r.RequestURI)
+		http.Redirect(w, r, protocol+"://"+redirect.HostName+r.RequestURI, http.StatusMovedPermanently)
+
 		return true
 	}
 
@@ -204,6 +209,7 @@ func (api ObjectAPIHandlers) HandledByWebsite(w http.ResponseWriter, r *http.Req
 			credential.AllowOtherUserAccess = isAllow
 			index, err := api.ObjectAPI.GetObjectInfo(r.Context(), ctx.BucketName, indexName, "", credential)
 			if err != nil {
+				helper.Logger.Error(r.Context(), "HandledByWebsite err for index:", indexName, err)
 				if err == ErrNoSuchKey {
 					api.errAllowableObjectNotFound(w, r, credential)
 					return true
@@ -237,7 +243,11 @@ func (api ObjectAPIHandlers) HandledByWebsite(w http.ResponseWriter, r *http.Req
 	return false
 }
 
+// Return configured website ErrorDocument.
+// If successfully sent ErrorDocument, return true which mean it's handled,
+// Else return false, and error code will be sent to client by errAllowableObjectNotFound().
 func (api ObjectAPIHandlers) ReturnWebsiteErrorDocument(w http.ResponseWriter, r *http.Request, statusCode int) (handled bool) {
+	helper.Logger.Info(r.Context(), "ReturnWebsiteErrorDocument statusCode:", statusCode)
 	w.(*ResponseRecorder).operationName = "GetObject"
 	ctx := getRequestContext(r)
 	if ctx.BucketInfo == nil {
@@ -250,16 +260,20 @@ func (api ObjectAPIHandlers) ReturnWebsiteErrorDocument(w http.ResponseWriter, r
 		credential := common.Credential{}
 		isAllow, err := IsBucketPolicyAllowed(credential.UserId, ctx.BucketInfo, r, policy.GetObjectAction, indexName)
 		if err != nil {
-			WriteErrorResponse(w, r, err)
-			return true
+			helper.Logger.Error(r.Context(), "IsBucketPolicyAllowed fail for:", ctx.BucketInfo.Name, indexName, err, isAllow)
+			return false
 		}
+
 		credential.AllowOtherUserAccess = isAllow
 		index, err := api.ObjectAPI.GetObjectInfo(r.Context(), ctx.BucketName, indexName, "", credential)
 		if err != nil {
-			WriteErrorResponse(w, r, err)
-			return true
+			helper.Logger.Error(r.Context(), "GetObjectInfo failed for:", ctx.BucketName, indexName, err)
+			return false
 		}
-		writer := newGetObjectResponseWriter(w, r, index, nil, http.StatusNotFound, "")
+
+		helper.Logger.Info(r.Context(), "ReturnWebsiteErrorDocument: ", ctx.BucketName, indexName)
+
+		writer := newGetObjectResponseWriter(w, r, index, nil, statusCode, "")
 		// Reads the object at startOffset and writes to mw.
 		if err := api.ObjectAPI.GetObject(r.Context(), index, 0, index.Size, writer, datatype.SseRequest{}); err != nil {
 			helper.ErrorIf(err, "Unable to write to client.")
@@ -268,7 +282,7 @@ func (api ObjectAPIHandlers) ReturnWebsiteErrorDocument(w http.ResponseWriter, r
 				// partial data has already been written before an error
 				// occurred then no point in setting StatusCode and
 				// sending error XML.
-				WriteErrorResponse(w, r, err)
+				return false
 			}
 			return true
 		}

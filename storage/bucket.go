@@ -394,6 +394,7 @@ func (yig *YigStorage) GetBucketWebsite(bucketName string) (config datatype.Webs
 }
 
 func (yig *YigStorage) DeleteBucketWebsite(bucket *types.Bucket) error {
+	bucket.Website = datatype.WebsiteConfiguration{}
 	err := yig.MetaStorage.Client.PutBucket(bucket)
 	if err != nil {
 		return err

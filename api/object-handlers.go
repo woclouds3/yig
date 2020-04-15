@@ -90,6 +90,7 @@ func (api ObjectAPIHandlers) errAllowableObjectNotFound(w http.ResponseWriter, r
 	// * if you don’t have the s3:ListBucket
 	//   permission, Amazon S3 will return an HTTP
 	//   status code 403 ("access denied") error.`
+	helper.Logger.Info(r.Context(), "errAllowableObjectNotFound")
 	ctx := getRequestContext(r)
 	if ctx.BucketInfo == nil {
 		WriteErrorResponse(w, r, ErrNoSuchBucket)
@@ -129,6 +130,8 @@ func (api ObjectAPIHandlers) errAllowableObjectNotFound(w http.ResponseWriter, r
 	} else {
 		status = http.StatusInternalServerError
 	}
+	helper.Logger.Info(r.Context(), "status:", status, "err:", err)
+
 	// match routing rules
 	if len(website.RoutingRules) != 0 {
 		for _, rule := range website.RoutingRules {
