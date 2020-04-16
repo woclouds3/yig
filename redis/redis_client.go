@@ -384,3 +384,15 @@ func (cli *RedisCli) HMGet(key string, fields []string) (map[string]interface{},
 	}
 	return results, nil
 }
+
+func (cli *RedisCli) HExists(key string, field string) (exists bool, err error) {
+	switch cli.clientType {
+	case REDIS_NORMAL_CLIENT, REDIS_SENTINEL_CLIENT:
+		exists, err = cli.redisClient.HExists(key, field).Result()
+	case REDIS_CLUSTER_CLIENT:
+		exists, err = cli.redisClusterClient.HExists(key, field).Result()
+	default:
+		return false, errors.New(ERR_NOT_INIT_MSG)
+	}
+	return exists, err
+}

@@ -25,7 +25,7 @@ func (m *Meta) DeleteMultipart(ctx context.Context, multipart Multipart) (err er
 	for _, p := range multipart.Parts {
 		removedSize += p.Size
 	}
-	err = m.UpdateUsage(ctx, multipart.BucketName, -removedSize)
+	err = m.UpdateBucketInfo(ctx, multipart.BucketName, FIELD_NAME_USAGE, -removedSize)
 	if err != nil {
 		return
 	}
@@ -48,7 +48,7 @@ func (m *Meta) PutObjectPart(ctx context.Context, multipart Multipart, part Part
 	if part, ok := multipart.Parts[part.PartNumber]; ok {
 		removedSize += part.Size
 	}
-	err = m.UpdateUsage(ctx, multipart.BucketName, part.Size-removedSize)
+	err = m.UpdateBucketInfo(ctx, multipart.BucketName, FIELD_NAME_USAGE, part.Size-removedSize)
 	if err != nil {
 		return
 	}

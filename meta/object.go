@@ -104,10 +104,20 @@ func (m *Meta) PutObject(ctx context.Context, object *Object, multipart *Multipa
 			return err
 		}
 	}
+	err = m.Client.CommitTrans(tx)
+	if err != nil {
+		helper.Logger.Error(ctx, fmt.Sprintf("failed to put object meta for bucket: %s, obj: %s, err: %v",
+			object.BucketName, object.Name, err))
+		return err
+	}
 
+	err = m.UpdateBucketInfo(ctx, object.BucketName, FIELD_NAME_FILE_NUM, 1)
+	if err != nil {
+		return err
+	}
 	if updateUsage {
 		ustart := time.Now()
-		err = m.UpdateUsage(ctx, object.BucketName, object.Size)
+		err = m.UpdateBucketInfo(ctx, object.BucketName, FIELD_NAME_USAGE, object.Size)
 		if err != nil {
 			return err
 		}
@@ -118,7 +128,6 @@ func (m *Meta) PutObject(ctx context.Context, object *Object, multipart *Multipa
 				object.BucketName, object.Name, object.Size, dur))
 		}
 	}
-	err = m.Client.CommitTrans(tx)
 	tend := time.Now()
 	dur := tend.Sub(tstart)
 	if dur/1000000 >= 100 {
@@ -168,7 +177,12 @@ func (m *Meta) DeleteObject(ctx context.Context, object *Object, DeleteMarker bo
 		return err
 	}
 
-	err = m.UpdateUsage(ctx, object.BucketName, -object.Size)
+	err = m.UpdateBucketInfo(ctx, object.BucketName, FIELD_NAME_USAGE, -object.Size)
+	if err != nil {
+		return err
+	}
+
+	err = m.UpdateBucketInfo(ctx, object.BucketName, FIELD_NAME_FILE_NUM, -1)
 
 	return err
 }
