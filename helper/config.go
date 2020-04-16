@@ -122,6 +122,7 @@ type GlacierConfig struct {
 	GlacierRegion        string `toml:"glacier_region"`
 	GlacierTier          string `toml:"glacier_tier"`
 	HiddenBucketLcThread int    `toml:"hidden_bucket_lc_thread"`
+	TransitionThread 	 int    `toml:"transition_thread"`
 }
 
 var CONFIG Config
@@ -222,6 +223,7 @@ func MarshalTOMLConfig() error {
 
 	CONFIG.Glacier = c.Glacier
 	CONFIG.Glacier.GlacierTier = Ternary(c.Glacier.GlacierTier == "", "Standard", c.Glacier.GlacierTier).(string)
+	CONFIG.Glacier.TransitionThread = Ternary(c.Glacier.TransitionThread <= 0, 1, c.Glacier.TransitionThread).(int)
 	CONFIG.Glacier.HiddenBucketLcThread = Ternary(c.Glacier.HiddenBucketLcThread <= 0, 1, c.Glacier.HiddenBucketLcThread).(int)
 
 	return nil

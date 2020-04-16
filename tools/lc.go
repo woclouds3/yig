@@ -25,8 +25,6 @@ const (
 	DEFAULT_LC_SLEEP_INTERVAL_HOUR     = 1 //TODO 24
 	DEFAULT_LC_WAIT_FOR_GLACIER_MINUTE = 30
 	DEFAULT_LC_QUEUE_LENGTH            = 100
-
-	MAX_GLACIER_TRANSITION_SIZE = 4 * storage.TB
 )
 
 var (
@@ -37,10 +35,6 @@ var (
 	waitgroup   sync.WaitGroup
 	empty       bool
 	stop        bool
-
-	// For Glacier only.
-	taskHiddenBucketQ       chan string
-	hiddenBucketLcWaitGroup sync.WaitGroup
 )
 
 func getLifeCycles() {
@@ -298,6 +292,10 @@ func main() {
 	}
 	go getLifeCycles()
 
+	if helper.CONFIG.Glacier.EnableGlacier {
+		StartTransition()
+	}
+
 	signal.Notify(signalQueue, syscall.SIGINT, syscall.SIGTERM,
 		syscall.SIGQUIT, syscall.SIGHUP)
 	for {
@@ -310,6 +308,9 @@ func main() {
 			// stop YIG server, order matters
 			stop = true
 			waitgroup.Wait()
+			if helper.CONFIG.Glacier.EnableGlacier {
+				transitionWaitGroup.Wait()
+			}
 			return
 		}
 	}

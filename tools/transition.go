@@ -13,10 +13,8 @@ import (
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/iam"
 	"github.com/journeymidnight/yig/iam/common"
-	"github.com/journeymidnight/yig/log"
 	"github.com/journeymidnight/yig/meta/types"
 	"github.com/journeymidnight/yig/mods"
-	"github.com/journeymidnight/yig/redis"
 	"github.com/journeymidnight/yig/storage"
 )
 
@@ -32,23 +30,19 @@ const (
 )
 
 var (
-	logger      *log.Logger
-	yig         *storage.YigStorage
-	taskQ       chan types.LifeCycle
-	signalQueue chan os.Signal
-	waitgroup   sync.WaitGroup
-	stop        bool
+	transitionTaskQ       chan types.LifeCycle
+	transitionWaitGroup   sync.WaitGroup
 
 	// For Glacier only. Delete expiring hidden objects timely.
 	taskHiddenBucketQ       chan string
 	hiddenBucketLcWaitGroup sync.WaitGroup
 )
 
-func getLifeCycles() {
+func getLifeCycleTransition() {
 	var marker string
 	logger.Println(5, "[ Glacier ] all bucket transition handle start")
-	waitgroup.Add(1)
-	defer waitgroup.Done()
+	transitionWaitGroup.Add(1)
+	defer transitionWaitGroup.Done()
 	for {
 		if stop {
 			helper.Logger.Print(5, ".")
@@ -88,14 +82,6 @@ func getLifeCycles() {
 
 }
 
-func checkIfExpiration(updateTime time.Time, days int) bool {
-	if helper.CONFIG.LcDebug == false {
-		return int(time.Since(updateTime).Seconds()) >= days*24*3600
-	} else {
-		return int(time.Since(updateTime).Seconds()) >= days
-	}
-}
-
 // If a rule has an empty prefix ,the days in it will be consider as a default days for all objects that not specified in
 // other rules. For this reason, we have two conditions to check if a object has expired and should be deleted
 //  if defaultConfig == true
@@ -109,10 +95,10 @@ func checkIfExpiration(updateTime time.Time, days int) bool {
 //  if defaultConfig == false
 //                 for each rule get objects by prefix
 //  iterator rules ----------------------------------> loop objects-------->delete object if expired
-func retrieveBucket(lc types.LifeCycle) error {
+func transitionRetrieveBucket(lc types.LifeCycle) error {
 	bucket, err := yig.MetaStorage.GetBucket(nil, lc.BucketName, false)
 	if err != nil {
-		logger.Println(5, "[ Glacier ] retrieveBucket GetBucket failed, ", err)
+		logger.Println(5, "[ Glacier ] transitionRetrieveBucket GetBucket failed, ", err)
 		return err
 	}
 	var glacierRules []datatype.LcRule
@@ -181,7 +167,7 @@ func transitionObjectsForRule(bucket *types.Bucket, rule *datatype.LcRule) {
 	}
 }
 
-func processLifecycle() {
+func processTransition() {
 	time.Sleep(time.Second * 1)
 	for {
 		if stop {
@@ -190,16 +176,16 @@ func processLifecycle() {
 		}
 
 		item := <-taskQ
-		waitgroup.Add(1)
-		err := retrieveBucket(item)
+		transitionWaitGroup.Add(1)
+		err := transitionRetrieveBucket(item)
 		if err != nil {
 			logger.Println(5, "[ Glacier ] [ERR] Bucket: ", item.BucketName, err)
-			waitgroup.Done()
+			transitionWaitGroup.Done()
 			continue
 		}
 		logger.Printf(20, "[ Glacier ] [DONE] Bucket:%s\n", item.BucketName)
 
-		waitgroup.Done()
+		transitionWaitGroup.Done()
 	}
 }
 
@@ -254,14 +240,14 @@ func processHiddenBucket() {
 
 		bucketName := <-taskHiddenBucketQ
 		helper.Logger.Println(20, "[ HiddenBucket ] processHiddenBucket receive a bucket:", bucketName)
-		waitgroup.Add(1)
+		transitionWaitGroup.Add(1)
 		err := retrieveHiddenBucket(bucketName)
 		if err != nil {
 			logger.Println(5, "[ERR] Bucket: ", bucketName, err)
 		} else {
 			fmt.Printf("[DONE] Bucket:%s\n", bucketName)
 		}
-		waitgroup.Done()
+		transitionWaitGroup.Done()
 	}
 }
 
@@ -311,62 +297,32 @@ func retrieveHiddenBucket(bucketName string) error {
 	return nil
 }
 
-func main() {
-	helper.SetupConfig()
-
-	f, err := os.OpenFile(DEFAULT_TRANSITION_LOG_PATH, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		panic("Failed to open log file in current dir")
+func StartTransition() {
+	if !helper.CONFIG.Glacier.EnableGlacier {
+		helper.Logger.Println(5, "Glacier not enabled.")
+		return
 	}
-	defer f.Close()
-	stop = false
-	logger = log.New(f, "[yig]", log.LstdFlags, helper.CONFIG.LogLevel)
-	helper.Logger = logger
-	if helper.CONFIG.MetaCacheType > 0 || helper.CONFIG.EnableDataCache {
-		redis.Initialize()
-		defer redis.Close()
-	}
-	yig = storage.New(logger, helper.CONFIG.MetaCacheType, helper.CONFIG.EnableDataCache, helper.CONFIG.CephConfigPattern)
+	
 	taskQ = make(chan types.LifeCycle, SCAN_TRANSITION_LIMIT)
 	taskHiddenBucketQ = make(chan string, SCAN_TRANSITION_LIMIT)
 	signal.Ignore()
 	signalQueue = make(chan os.Signal)
 
 	// Glacier requires ak/sk, use this to initialize iam plugin in lc process.
-	if helper.CONFIG.Glacier.EnableGlacier {
-		allPluginMap := mods.InitialPlugins()
-		iam.InitializeIamClient(allPluginMap)
-	}
+	allPluginMap := mods.InitialPlugins()
+	iam.InitializeIamClient(allPluginMap)
 
-	numOfWorkers := helper.CONFIG.LcThread
-	helper.Logger.Println(5, "start lc thread:", numOfWorkers)
-	for i := 0; i < numOfWorkers; i++ {
-		go processLifecycle()
+	helper.Logger.Println(5, "start transition thread:", helper.CONFIG.Glacier.TransitionThread)
+	for i := 0; i < helper.CONFIG.Glacier.TransitionThread; i++ {
+		go processTransition()
 	}
-	go getLifeCycles()
+	go getLifeCycleTransition()
 
-	if helper.CONFIG.Glacier.EnableGlacier {
-		helper.Logger.Println(5, "start hidden bucket thread:", helper.CONFIG.Glacier.HiddenBucketLcThread)
-		for i := 0; i < helper.CONFIG.Glacier.HiddenBucketLcThread; i++ {
-			go processHiddenBucket()
-		}
-		go getHiddenBucket()
+	helper.Logger.Println(5, "start hidden bucket thread:", helper.CONFIG.Glacier.HiddenBucketLcThread)
+	for i := 0; i < helper.CONFIG.Glacier.HiddenBucketLcThread; i++ {
+		go processHiddenBucket()
 	}
-
-	signal.Notify(signalQueue, syscall.SIGINT, syscall.SIGTERM,
-		syscall.SIGQUIT, syscall.SIGHUP)
-	for {
-		s := <-signalQueue
-		switch s {
-		case syscall.SIGHUP:
-			// reload config file
-			helper.SetupConfig()
-		default:
-			// stop YIG server, order matters
-			stop = true
-			waitgroup.Wait()
-			return
-		}
-	}
-
+	go getHiddenBucket()
+	
+	helper.Logger.Println(5, "Glacier transition started.")
 }
