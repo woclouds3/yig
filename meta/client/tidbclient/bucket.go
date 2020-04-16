@@ -15,14 +15,15 @@ import (
 )
 
 func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
-	var acl, cors, lc, policy, createTime string
+	var acl, cors, logging, lc, policy, createTime string
 	var updateTime sql.NullString
-	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,update_time from buckets where bucketname=?;"
+	sqltext := "select bucketname,acl,cors,COALESCE(logging,\"\"),lc,uid,policy,createtime,usages,versioning,update_time from buckets where bucketname=?;"
 	tmp := &Bucket{}
 	err = t.Client.QueryRow(sqltext, bucketName).Scan(
 		&tmp.Name,
 		&acl,
 		&cors,
+		&logging,
 		&lc,
 		&tmp.OwnerId,
 		&policy,
@@ -49,6 +50,10 @@ func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
 	if err != nil {
 		return
 	}
+	err = json.Unmarshal([]byte(logging), &tmp.BucketLogging)
+	if err != nil {
+		return
+	}
 	err = json.Unmarshal([]byte(lc), &tmp.LC)
 	if err != nil {
 		return
@@ -68,7 +73,7 @@ func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
 }
 
 func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
-	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,update_time from buckets;"
+	sqltext := "select bucketname,acl,cors,COALESCE(logging,\"\"),lc,uid,policy,createtime,usages,versioning,update_time from buckets;"
 	rows, err := t.Client.Query(sqltext)
 	if err == sql.ErrNoRows {
 		err = nil
@@ -80,12 +85,13 @@ func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
 
 	for rows.Next() {
 		var tmp Bucket
-		var acl, cors, lc, policy, createTime string
+		var acl, cors, logging, lc, policy, createTime string
 		var updateTime sql.NullString
 		err = rows.Scan(
 			&tmp.Name,
 			&acl,
 			&cors,
+			&logging,
 			&lc,
 			&tmp.OwnerId,
 			&policy,
@@ -109,6 +115,10 @@ func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
 			return
 		}
 		err = json.Unmarshal([]byte(lc), &tmp.LC)
+		if err != nil {
+			return
+		}
+		err = json.Unmarshal([]byte(logging), &tmp.BucketLogging)
 		if err != nil {
 			return
 		}
@@ -338,7 +348,7 @@ func (t *TidbClient) ListObjects(ctx context.Context, bucketName, marker, verIdM
 			// Looped all the versions in the marker.
 			// Start from next object name.
 			helper.Logger.Info(ctx, "Looped all the versions for", bucketName, marker, rawVersionIdMarker)
-			
+
 			if !exit && rawVersionIdMarker != "" {
 				rawVersionIdMarker = ""
 				continue
