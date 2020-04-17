@@ -1,8 +1,9 @@
 package _go
 
 import (
-	. "github.com/journeymidnight/yig/test/go/lib"
 	"testing"
+
+	. "github.com/journeymidnight/yig/test/go/lib"
 )
 
 func Test_MakeBucket(t *testing.T) {
@@ -37,4 +38,14 @@ func Test_DeleteBucket(t *testing.T) {
 		panic(err)
 	}
 	t.Log("DeleteBucket Success.")
+}
+
+func Test_MakeInvalidBucket(t *testing.T) {
+	sc := NewS3()
+	err := sc.MakeBucket(TEST_INVALID_BUCKET)
+	if err == nil {
+		t.Fatal("MakeInvalidBucket err:", err)
+		panic(err)
+	}
+	t.Log("MakeInvalidBucket Success.")
 }

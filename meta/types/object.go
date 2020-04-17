@@ -50,6 +50,7 @@ type Object struct {
 	// ObjectType include `Normal`, `Appendable`, 'Multipart'
 	Type         int
 	StorageClass StorageClass
+	Transitioning	int
 }
 
 type ObjectType string
@@ -58,6 +59,14 @@ const (
 	ObjectTypeNormal = iota
 	ObjectTypeAppendable
 	ObjectTypeMultipart
+)
+
+// Archive status, a combination of Job status from glacier, or no job initiated.
+const (
+	ArchiveStatusCodeRestored   = "Restored"
+	ArchiveStatusCodeInProgress = "InProgress"
+	ArchiveStatusCodeFailed     = "Failed"
+	ArchiveStatusCodeNoJob      = "NoJob"
 )
 
 func (o *Object) Serialize() (map[string]interface{}, error) {
@@ -254,10 +263,10 @@ func (o *Object) GetCreateSql() (string, []interface{}) {
 	customAttributes, _ := json.Marshal(o.CustomAttributes)
 	acl, _ := json.Marshal(o.ACL)
 	lastModifiedTime := o.LastModifiedTime.Format(TIME_LAYOUT_TIDB)
-	sql := "insert into objects values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+	sql := "insert into objects values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 	args := []interface{}{o.BucketName, o.Name, version, o.Location, o.Pool, o.OwnerId, o.Size, o.ObjectId,
 		lastModifiedTime, o.Etag, o.ContentType, customAttributes, acl, o.NullVersion, o.DeleteMarker,
-		o.SseType, o.EncryptionKey, o.InitializationVector, o.Type, o.StorageClass}
+		o.SseType, o.EncryptionKey, o.InitializationVector, o.Type, o.StorageClass, o.Transitioning}
 	return sql, args
 }
 
@@ -295,5 +304,32 @@ func (o *Object) GetAddUsageSql() (string, []interface{}) {
 func (o *Object) GetSubUsageSql() (string, []interface{}) {
 	sql := "update buckets set usages= usages + ? where bucketname=?"
 	args := []interface{}{-o.Size, o.BucketName}
+	return sql, args
+}
+
+func (o *Object) GetUpdateStorageClassSql() (string, []interface{}) {
+	/* TODO. should use version to locate the object. But version is not available in this release. */
+	sql := "update objects set storageclass=? where bucketname=? and name=? and objectid=?"
+	args := []interface{}{ObjectStorageClassGlacier, o.BucketName, o.Name, o.ObjectId}
+	return sql, args
+}
+
+func (o *Object) GetCreateArchiveSql(archiveId string) (string, []interface{}) {
+	sql := "insert ignore into archives values(?,?,?,?,?,?)"
+	args := []interface{}{o.BucketName, o.Name, o.ObjectId, archiveId, "", 0}
+	return sql, args
+}
+
+func (o *Object) GetUpdateArchiveJobIdSql(jobId string, days int64) (string, []interface{}) {
+	var sql string
+	var args []interface{}
+	if jobId == "" {
+		sql = "update archives set expiredays=? where bucketname=? and objectname=? and objectid=?"
+		args = []interface{}{days, o.BucketName, o.Name, o.ObjectId}
+	} else {
+		sql = "update archives set jobid=?, expiredays=? where bucketname=? and objectname=? and objectid=?"
+		args = []interface{}{jobId, days, o.BucketName, o.Name, o.ObjectId}
+	}
+
 	return sql, args
 }

@@ -69,7 +69,7 @@ func (a *Client) GetKeysByUid(uid string) (credentials []common.Credential, err 
 	var query Query
 	var offset int = 0
 	var total int = 0
-	query.Action = "DescribeAccessKeys"
+	query.Action = "ListAccessKeysByProject"
 	query.ProjectId = uid
 	for {
 		query.Offset = offset
@@ -89,7 +89,7 @@ func (a *Client) GetKeysByUid(uid string) (credentials []common.Credential, err 
 		}
 		defer response.Body.Close()
 		if response.StatusCode != 200 {
-			slog.Println(5, "QueryHistory to IAM failed as status != 200")
+			slog.Println(5, "QueryHistory to IAM failed as status != 200", response.StatusCode)
 			return credentials, fmt.Errorf("QueryHistory to IAM failed as status != 200")
 		}
 
@@ -105,6 +105,7 @@ func (a *Client) GetKeysByUid(uid string) (credentials []common.Credential, err 
 			return credentials, errors.New("Decode QueryRespAll failed")
 		}
 		if queryRetAll.RetCode != 0 {
+			slog.Println(5, "GetKeysByUid queryRetAll:", queryRetAll)
 			return credentials, errors.New("Query to IAM failed as RetCode != 0")
 		}
 		for _, value := range queryRetAll.Data.AccessKeySet {

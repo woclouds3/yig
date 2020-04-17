@@ -10,6 +10,7 @@ yig
 integrate/cephconf
 yig
 lc
+transition
 *.log
 *.swp
 yig

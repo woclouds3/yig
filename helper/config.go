@@ -78,6 +78,8 @@ type Config struct {
 
 	// Message Bus
 	MsgBus MsgBusConfig `toml:"msg_bus"`
+
+	Glacier GlacierConfig `toml:"glacier"`
 }
 
 type PluginConfig struct {
@@ -112,6 +114,15 @@ type MsgBusConfig struct {
 	// Controls the settings for the implementation of message bus.
 	// For kafka, the 'broker_list' must be set, like 'broker_list = "kafka:29092"'
 	Server map[string]interface{} `toml:"msg_bus_server"`
+}
+
+type GlacierConfig struct {
+	EnableGlacier        bool   `toml:"enable_glacier"`
+	GlacierHost          string `toml:"glacier_host"`
+	GlacierRegion        string `toml:"glacier_region"`
+	GlacierTier          string `toml:"glacier_tier"`
+	HiddenBucketLcThread int    `toml:"hidden_bucket_lc_thread"`
+	TransitionThread 	 int    `toml:"transition_thread"`
 }
 
 var CONFIG Config
@@ -209,6 +220,11 @@ func MarshalTOMLConfig() error {
 	CONFIG.MsgBus.RequestTimeoutMs = Ternary(c.MsgBus.RequestTimeoutMs == 0, 3000, c.MsgBus.RequestTimeoutMs).(int)
 	CONFIG.MsgBus.MessageTimeoutMs = Ternary(c.MsgBus.MessageTimeoutMs == 0, 5000, c.MsgBus.MessageTimeoutMs).(int)
 	CONFIG.MsgBus.SendMaxRetries = Ternary(c.MsgBus.SendMaxRetries == 0, 2, c.MsgBus.SendMaxRetries).(int)
+
+	CONFIG.Glacier = c.Glacier
+	CONFIG.Glacier.GlacierTier = Ternary(c.Glacier.GlacierTier == "", "Standard", c.Glacier.GlacierTier).(string)
+	CONFIG.Glacier.TransitionThread = Ternary(c.Glacier.TransitionThread <= 0, 1, c.Glacier.TransitionThread).(int)
+	CONFIG.Glacier.HiddenBucketLcThread = Ternary(c.Glacier.HiddenBucketLcThread <= 0, 1, c.Glacier.HiddenBucketLcThread).(int)
 
 	return nil
 }

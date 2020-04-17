@@ -20,8 +20,11 @@ import (
 )
 
 const (
-	SCAN_HBASE_LIMIT    = 50
-	DEFAULT_LC_LOG_PATH = "/var/log/yig/lc.log"
+	SCAN_HBASE_LIMIT                   = 50
+	DEFAULT_LC_LOG_PATH                = "/var/log/yig/lc.log"
+	DEFAULT_LC_SLEEP_INTERVAL_HOUR     = 1 //TODO 24
+	DEFAULT_LC_WAIT_FOR_GLACIER_MINUTE = 30
+	DEFAULT_LC_QUEUE_LENGTH            = 100
 )
 
 var (
@@ -45,12 +48,28 @@ func getLifeCycles() {
 			return
 		}
 
+		// Hualu i/o latency may be 3 min at worst. So wait 30 min here.
+		if len(taskQ) > DEFAULT_LC_QUEUE_LENGTH {
+			logger.Println(5, 5, "taskQ", len(taskQ), "too long, sleep")
+			time.Sleep(DEFAULT_LC_WAIT_FOR_GLACIER_MINUTE * time.Minute)
+			continue
+		}
+
+		logger.Println(5, 5, "ScanLifeCycle start")
+
 		result, err := yig.MetaStorage.ScanLifeCycle(nil, SCAN_HBASE_LIMIT, marker)
 		if err != nil {
 			logger.Println(5, "ScanLifeCycle failed", err)
 			signalQueue <- syscall.SIGQUIT
 			return
 		}
+
+		if len(result.Lcs) == 0 {
+			marker = ""
+			time.Sleep(DEFAULT_LC_SLEEP_INTERVAL_HOUR * time.Hour)
+			continue
+		}
+
 		for _, entry := range result.Lcs {
 			taskQ <- entry
 			marker = entry.BucketName
@@ -73,7 +92,7 @@ func checkIfExpiration(updateTime time.Time, days int) bool {
 	}
 }
 
-// If a rule has an empty prifex ,the days in it will be consider as a default days for all objects that not specified in
+// If a rule has an empty prefix ,the days in it will be consider as a default days for all objects that not specified in
 // other rules. For this reason, we have two conditions to check if a object has expired and should be deleted
 //  if defaultConfig == true
 //                    for each object           check if object name has a prifix
@@ -88,7 +107,7 @@ func checkIfExpiration(updateTime time.Time, days int) bool {
 //  iterator rules ----------------------------------> loop objects-------->delete object if expired
 func retrieveBucket(lc types.LifeCycle) error {
 	defaultConfig := false
-	defaultDays := 0
+	defaultDays := -1
 	bucket, err := yig.MetaStorage.GetBucket(nil, lc.BucketName, false)
 	if err != nil {
 		return err
@@ -97,9 +116,11 @@ func retrieveBucket(lc types.LifeCycle) error {
 	for _, rule := range rules {
 		if rule.Prefix == "" {
 			defaultConfig = true
-			defaultDays, err = strconv.Atoi(rule.Expiration)
-			if err != nil {
-				return err
+			if rule.Expiration != "" {
+				defaultDays, err = strconv.Atoi(rule.Expiration)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -110,6 +131,7 @@ func retrieveBucket(lc types.LifeCycle) error {
 		for {
 			retObjects, _, truncated, nextMarker, nextVerIdMarker, err := yig.ListObjectsInternal(nil, bucket.Name, request)
 			if err != nil {
+				logger.Println(5, "[Failed] retrieveBucket ListObjectsInternal failed", bucket.Name)
 				return err
 			}
 
@@ -135,8 +157,10 @@ func retrieveBucket(lc types.LifeCycle) error {
 				} else {
 					days = defaultDays
 				}
-				helper.Debugln("inteval:", time.Since(object.LastModifiedTime).Seconds())
-				if checkIfExpiration(object.LastModifiedTime, days) {
+				helper.Debugln("interval:", time.Since(object.LastModifiedTime).Seconds())
+
+				/* Check expiration first. */
+				if days != -1 && checkIfExpiration(object.LastModifiedTime, days) {
 					helper.Debugln("come here")
 					if object.NullVersion {
 						object.VersionId = ""
@@ -149,6 +173,8 @@ func retrieveBucket(lc types.LifeCycle) error {
 					}
 					helper.Logger.Println(5, "[DELETED]", object.BucketName, object.Name, object.VersionId)
 					fmt.Println("[DELETED]", object.BucketName, object.Name, object.VersionId)
+
+					continue
 				}
 			}
 			if truncated == true {
@@ -185,6 +211,8 @@ func retrieveBucket(lc types.LifeCycle) error {
 						}
 						helper.Logger.Println(5, "[DELETED]", object.BucketName, object.Name, object.VersionId)
 						fmt.Println("[DELETED]", object.BucketName, object.Name, object.VersionId)
+
+						continue
 					}
 				}
 				if truncated == true {
@@ -208,25 +236,29 @@ func processLifecycle() {
 			helper.Logger.Print(5, ".")
 			return
 		}
+		//		waitgroup.Add(1)
+		//		select {
+		//		case item := <-taskQ:
+		item := <-taskQ
 		waitgroup.Add(1)
-		select {
-		case item := <-taskQ:
-			err := retrieveBucket(item)
-			if err != nil {
-				logger.Println(5, "[ERR] Bucket: ", item.BucketName, err)
-				fmt.Printf("[ERR] Bucket:%v, %v", item.BucketName, err)
-				waitgroup.Done()
-				continue
-			}
-			fmt.Printf("[DONE] Bucket:%s", item.BucketName)
-		default:
-			if empty == true {
-				logger.Println(5, "all bucket lifecycle handle complete. QUIT")
-				signalQueue <- syscall.SIGQUIT
-				waitgroup.Done()
-				return
-			}
+		err := retrieveBucket(item)
+		if err != nil {
+			logger.Println(5, "[ERR] Bucket: ", item.BucketName, err)
+			fmt.Printf("[ERR] Bucket:%v, %v", item.BucketName, err)
+			waitgroup.Done()
+			continue
 		}
+		fmt.Printf("[DONE] Bucket:%s\n", item.BucketName)
+		/*
+			default:
+				if empty == true {
+					logger.Println(5, "all bucket lifecycle handle complete. QUIT")
+					signalQueue <- syscall.SIGQUIT
+					waitgroup.Done()
+					return
+				}
+			}
+		*/
 		waitgroup.Done()
 	}
 }
@@ -248,6 +280,7 @@ func main() {
 	}
 	yig = storage.New(logger, helper.CONFIG.MetaCacheType, helper.CONFIG.EnableDataCache, helper.CONFIG.CephConfigPattern)
 	taskQ = make(chan types.LifeCycle, SCAN_HBASE_LIMIT)
+	taskHiddenBucketQ = make(chan string, SCAN_HBASE_LIMIT)
 	signal.Ignore()
 	signalQueue = make(chan os.Signal)
 
@@ -258,6 +291,11 @@ func main() {
 		go processLifecycle()
 	}
 	go getLifeCycles()
+
+	if helper.CONFIG.Glacier.EnableGlacier {
+		StartTransition()
+	}
+
 	signal.Notify(signalQueue, syscall.SIGINT, syscall.SIGTERM,
 		syscall.SIGQUIT, syscall.SIGHUP)
 	for {
@@ -270,6 +308,9 @@ func main() {
 			// stop YIG server, order matters
 			stop = true
 			waitgroup.Wait()
+			if helper.CONFIG.Glacier.EnableGlacier {
+				transitionWaitGroup.Wait()
+			}
 			return
 		}
 	}

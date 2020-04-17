@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	FIELD_NAME_BODY  = "body"
-	FIELD_NAME_USAGE = "usage"
+	FIELD_NAME_BODY      = "body"
+	FIELD_NAME_USAGE     = "usage"
+	HIDDEN_BUCKET_PREFIX = "archive-restore-"
 )
 
 type Bucket struct {

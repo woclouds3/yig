@@ -1,26 +1,25 @@
 package glacierclient
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/glacier"
-	. "github.com/journeymidnight/yig/coldstorage/client"
 	. "github.com/journeymidnight/yig/error"
 )
 
 // To upload an archive to a vault.
-func (c GlacierClient) PutArchive(accountid, vaultname string, ioreadseeker io.ReadSeeker) (archiveid *string, err error) {
+func (c GlacierClient) PutArchive(accountid, vaultname string, ioReader io.Reader) (string, error) {
 	input := &glacier.UploadArchiveInput{
 		AccountId:          aws.String(accountid),
-		ArchiveDescription: aws.String(""),
-		Body:               ioreadseeker,
+		ArchiveDescription: aws.String("-"),
+		Body:               aws.ReadSeekCloser(ioReader),
 		Checksum:           aws.String(""),
 		VaultName:          aws.String(vaultname),
 	}
 	result, err := c.Client.UploadArchive(input)
+	var archiveId string
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
@@ -40,14 +39,16 @@ func (c GlacierClient) PutArchive(accountid, vaultname string, ioreadseeker io.R
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
-		return
+
+		archiveId = ""
+	} else {
+		archiveId = aws.StringValue(result.ArchiveId)
 	}
-	archiveid = result.ArchiveId
-	return archiveid, err
+	return archiveId, err
 }
 
 //To delete an archive from a vault.
-func (c GlacierClient) DeleteArchive(accountid, archiveid, vaultname string) error {
+func (c GlacierClient) DeleteArchive(accountid string, archiveid string, vaultname string) error {
 	input := &glacier.DeleteArchiveInput{
 		AccountId: aws.String(accountid),
 		ArchiveId: aws.String(archiveid),
@@ -76,13 +77,14 @@ func (c GlacierClient) DeleteArchive(accountid, archiveid, vaultname string) err
 }
 
 //To initiate a multipart upload.
-func (c GlacierClient) CreateMultipart(accountid, partsize, vaultname string) (uploadid *string, err error) {
+func (c GlacierClient) CreateMultipart(accountid, partsize, vaultname string) (string, error) {
 	input := &glacier.InitiateMultipartUploadInput{
 		AccountId: aws.String(accountid),
 		PartSize:  aws.String(partsize),
 		VaultName: aws.String(vaultname),
 	}
 	result, err := c.Client.InitiateMultipartUpload(input)
+	var uploadId string
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
@@ -100,17 +102,20 @@ func (c GlacierClient) CreateMultipart(accountid, partsize, vaultname string) (u
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
-		return
+
+		uploadId = ""
+	} else {
+		uploadId = aws.StringValue(result.UploadId)
 	}
-	uploadid = result.UploadId
-	return uploadid, err
+
+	return uploadId, err
 }
 
 //To upload a part of an archive.
-func (c GlacierClient) PutArchivePart(accountid, uploadid, vaultname, partrange string, ioreadseeker io.ReadSeeker) error {
+func (c GlacierClient) PutArchivePart(accountid, uploadid, vaultname string, partrange string, ioReader io.Reader) error {
 	input := &glacier.UploadMultipartPartInput{
 		AccountId: aws.String(accountid),
-		Body:      aws.ReadSeekCloser(ioreadseeker),
+		Body:      aws.ReadSeekCloser(ioReader),
 		Range:     aws.String(partrange),
 		UploadId:  aws.String(uploadid),
 		VaultName: aws.String(vaultname),
@@ -130,7 +135,6 @@ func (c GlacierClient) PutArchivePart(accountid, uploadid, vaultname, partrange 
 			case glacier.ErrCodeServiceUnavailableException:
 				err = ErrServiceUnavailable
 			default:
-				fmt.Println(aerr.Error())
 				Logger.Println(5, "With error: ", aerr.Error())
 			}
 		} else {
@@ -141,13 +145,14 @@ func (c GlacierClient) PutArchivePart(accountid, uploadid, vaultname, partrange 
 }
 
 //All the archive parts have been uploaded and assemble the archive from the uploaded parts.
-func (c GlacierClient) CompleteMultipartUpload(accountid, uploadid, vaultname string) (archiveid *string, err error) {
+func (c GlacierClient) CompleteMultipartUpload(accountid, uploadid, vaultname string) (string, error) {
 	input := &glacier.CompleteMultipartUploadInput{
 		AccountId: aws.String(accountid),
 		UploadId:  aws.String(uploadid),
 		VaultName: aws.String(vaultname),
 	}
 	result, err := c.Client.CompleteMultipartUpload(input)
+	var archiveId string
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
@@ -165,14 +170,17 @@ func (c GlacierClient) CompleteMultipartUpload(accountid, uploadid, vaultname st
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
-		return
+
+		archiveId = ""
+	} else {
+		archiveId = aws.StringValue(result.ArchiveId)
 	}
-	archiveid = result.ArchiveId
-	return archiveid, err
+
+	return archiveId, err
 }
 
 //To list in-progress multipart uploads for the specified vault.
-func (c GlacierClient) GetMultipartFromVault(accountid, vaultname string) (uploadlist []*glacier.UploadListElement, err error) {
+func (c GlacierClient) GetMultipartFromVault(accountid, vaultname string) ([]*glacier.UploadListElement, error) {
 	input := &glacier.ListMultipartUploadsInput{
 		AccountId: aws.String(accountid),
 		VaultName: aws.String(vaultname),
@@ -195,14 +203,14 @@ func (c GlacierClient) GetMultipartFromVault(accountid, vaultname string) (uploa
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
-		return
+		return nil, err
 	}
-	uploadlist = result.UploadsList
+	uploadlist := result.UploadsList
 	return uploadlist, err
 }
 
 //To list the parts of an archive that have been uploaded in a specific multipart upload.
-func (c GlacierClient) GetMultipartFromArchive(accountid, uploadid, vaultname string) (parts []*glacier.PartListElement, err error) {
+func (c GlacierClient) GetMultipartFromArchive(accountid, uploadid, vaultname string) ([]*glacier.PartListElement, error) {
 	input := &glacier.ListPartsInput{
 		AccountId: aws.String(accountid),
 		UploadId:  aws.String(uploadid),
@@ -226,14 +234,14 @@ func (c GlacierClient) GetMultipartFromArchive(accountid, uploadid, vaultname st
 		} else {
 			Logger.Println(5, "With error: ", aerr.Error())
 		}
-		return
+		return nil, err
 	}
-	parts = result.Parts
+	parts := result.Parts
 	return parts, err
 }
 
 //To abort a multipart upload identified by the upload ID.
-func (c GlacierClient) AbortMultipart(accountid, uploadid, vaultname string) error {
+func (c GlacierClient) DeleteMultipart(accountid, uploadid, vaultname string) error {
 	input := &glacier.AbortMultipartUploadInput{
 		AccountId: aws.String(accountid),
 		VaultName: aws.String(vaultname),

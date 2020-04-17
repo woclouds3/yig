@@ -258,6 +258,44 @@ func (api ObjectAPIHandlers) GetObjectHandler(w http.ResponseWriter, r *http.Req
 			r.Header.Get("X-Amz-Server-Side-Encryption-Customer-Key-Md5"))
 	}
 
+	helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "GetObjectHandler", object.StorageClass, meta.ObjectStorageClassGlacier, object.VersionId, version)
+
+	// Get object from hidden bucket.
+	if helper.CONFIG.Glacier.EnableGlacier && object.StorageClass == meta.ObjectStorageClassGlacier {
+		if object.SseType != "" {
+			// Should no happend. SSE object will not be trasitted as archives.
+			helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "GetObjectHandler glacier don't support sse or startoff")
+			WriteErrorResponse(w, r, ErrNotImplemented)
+			return
+		}
+
+		// Find restored object name (archive id).
+		restoredObject, err := api.ObjectAPI.GetObjectInfo(r.Context(),
+			meta.HIDDEN_BUCKET_PREFIX+credential.UserId,
+			api.ObjectAPI.GetRestoredObjectName(r.Context(), object),
+			"",
+			credential)
+		if err != nil {
+			helper.Logger.Printf(20, "[ %s ] GetObjectInfo failed for restored %s  err %v",
+				RequestIdFromContext(r.Context()), objectName, err)
+			WriteErrorResponse(w, r, ErrInvalidObjectState)
+			return
+		}
+		if err := api.ObjectAPI.GetObject(r.Context(), restoredObject, startOffset, length, writer, sseRequest); err != nil {
+			helper.ErrorIf(err, "Unable to write to client.")
+			if !dataWritten {
+				WriteErrorResponse(w, r, err)
+			}
+			return
+		}
+
+		if !dataWritten {
+			writer.Write(nil)
+		}
+
+		return
+	}
+
 	// Reads the object at startOffset and writes to mw.
 	if err := api.ObjectAPI.GetObject(r.Context(), object, startOffset, length, writer, sseRequest); err != nil {
 		helper.ErrorIf(err, "Unable to write to client.")
@@ -365,6 +403,26 @@ func (api ObjectAPIHandlers) HeadObjectHandler(w http.ResponseWriter, r *http.Re
 		w.Header().Set("X-Amz-Server-Side-Encryption-Customer-Algorithm", "AES256")
 		w.Header().Set("X-Amz-Server-Side-Encryption-Customer-Key-Md5",
 			r.Header.Get("X-Amz-Server-Side-Encryption-Customer-Key-Md5"))
+	}
+
+	// Glacier
+	if helper.CONFIG.Glacier.EnableGlacier && object.StorageClass == meta.ObjectStorageClassGlacier {
+		// If the object is an archived object (an object whose storage class is GLACIER), the response includes this
+		// header if either the archive restoration is in progress (see RestoreObject) or an archive copy is already
+		// restored.
+		// Like,
+		// x-amz-restore: ongoing-request="true"
+		// Or,
+		// x-amz-restore: ongoing-request="false", expiry-date="Wed, 07 Nov 2012 00:00:00 GMT"
+		archiveStatus, expireDate, err := api.ObjectAPI.GetArchiveStatus(r.Context(), bucketName, objectName, version, credential)
+		if err == nil {
+			switch archiveStatus {
+			case meta.ArchiveStatusCodeRestored:
+				w.Header().Set("x-amz-restore", "ongoing-request=\"false\", expiry-date=\""+expireDate+"\"")
+			case meta.ArchiveStatusCodeInProgress:
+				w.Header().Set("x-amz-restore", "ongoing-request=\"true\"")
+			}
+		}
 	}
 
 	// Successful response.
@@ -540,6 +598,8 @@ func (api ObjectAPIHandlers) CopyObjectHandler(w http.ResponseWriter, r *http.Re
 	go func() {
 		startOffset := int64(0) // Read the whole file.
 		// Get the object.
+		// If the source object's storage class is GLACIER, then you must restore a copy of this object before you can
+		// use it as a source object for the copy operation. For more information, see RestoreObject.
 		err = api.ObjectAPI.GetObject(r.Context(), sourceObject, startOffset, sourceObject.Size,
 			pipeWriter, sseRequest)
 		if err != nil {
@@ -880,7 +940,7 @@ func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if objInfo != nil && objInfo.Type != meta.ObjectTypeAppendable {
+	if objInfo != nil && (objInfo.Type != meta.ObjectTypeAppendable || objInfo.StorageClass != meta.ObjectStorageClassStandard) {
 		WriteErrorResponse(w, r, ErrObjectNotAppendable)
 		return
 	}
@@ -918,6 +978,20 @@ func (api ObjectAPIHandlers) AppendObjectHandler(w http.ResponseWriter, r *http.
 		if sseRequest.Type == crypto.SSEC.String() {
 			WriteErrorResponse(w, r, ErrNotImplemented)
 			return
+		}
+	}
+
+	// Append is not supported with Archiving buckets.
+	if helper.CONFIG.Glacier.EnableGlacier == true {
+		lc, err := api.ObjectAPI.GetBucketLc(r.Context(), bucketName, credential)
+		if err == nil {
+			for _, rule := range lc.Rule {
+				if rule.TransitionStorageClass == "GLACIER" {
+					helper.Debugln("[", RequestIdFromContext(r.Context()), "]", bucketName, "Append is not supported with Lc rule", rule)
+					WriteErrorResponse(w, r, ErrObjectNotAppendable)
+					return
+				}
+			}
 		}
 	}
 
@@ -1786,4 +1860,94 @@ func (api ObjectAPIHandlers) PostObjectHandler(w http.ResponseWriter, r *http.Re
 		w.WriteHeader(201)
 		w.Write(encodedSuccessResponse)
 	}
+}
+
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html
+func (api ObjectAPIHandlers) RestoreObjectHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	reqId := RequestIdFromContext(ctx)
+	helper.Logger.Println(20, "[", reqId, "]", "RestoreObjectHandler")
+
+	if !helper.CONFIG.Glacier.EnableGlacier {
+		helper.Logger.Println(20, "[", reqId, "]", "RestoreObjectHandler not enabled in config: helper.CONFIG.Glacier.EnableGlacier %v", helper.CONFIG.Glacier.EnableGlacier)
+		WriteErrorResponse(w, r, ErrNotImplemented)
+		return
+	}
+
+	vars := mux.Vars(r)
+	bucketName := vars["bucket"]
+	objectName := vars["object"]
+	version := r.URL.Query().Get("VersionId") /* TODO */
+
+	// TODO is restore get or put ?
+	credential, err := checkRequestAuth(api, r, policy.GetObjectAction, bucketName, objectName)
+	if err != nil {
+		WriteErrorResponse(w, r, err)
+		return
+	}
+
+	buffer, err := ioutil.ReadAll(io.LimitReader(r.Body, 1024))
+	if err != nil {
+		helper.ErrorIf(err, "Unable to read RestoreRequest body")
+		WriteErrorResponse(w, r, ErrInvalidRequestBody)
+		return
+	}
+
+	var restoreRequest RestoreRequest
+	err = xml.Unmarshal(buffer, &restoreRequest)
+	if err != nil {
+		helper.ErrorIf(err, "Unable to Unmarshal xml for RestoreRequest")
+		WriteErrorResponse(w, r, ErrInvalidRequestBody)
+		return
+	}
+
+	helper.Logger.Println(20, "[", reqId, "] Restore request: ", bucketName, objectName, version, restoreRequest.Days, restoreRequest.Tier)
+
+	// Support restore archive only. SELECT is not supported.
+	if restoreRequest.Type != "" {
+		helper.ErrorIf(nil, "Unable to handle request type", restoreRequest.Type)
+		WriteErrorResponse(w, r, ErrNotImplemented)
+		return
+	}
+
+	if !IsValidRestoreTier(restoreRequest.Tier) {
+		helper.ErrorIf(nil, "Invalid Tier", restoreRequest.Tier)
+		WriteErrorResponse(w, r, ErrInvalidRequestBody)
+		return
+	}
+
+	if restoreRequest.Days < 0 {
+		helper.ErrorIf(nil, "Invalid Days", restoreRequest.Days)
+		WriteErrorResponse(w, r, ErrInvalidRequestBody)
+		return
+	}
+	if restoreRequest.Days == int64(0) {
+		restoreRequest.Days = DEFAULT_RESTORE_DAYS
+	}
+
+	archiveStatus, _, err := api.ObjectAPI.GetArchiveStatus(r.Context(), bucketName, objectName, version, credential)
+	if err != nil {
+		WriteErrorResponse(w, r, ErrInternalError)
+		return
+	}
+
+	// job in process, return 409.
+	// TODO: it's possible that two restore requests arrive simutanously and both issued to Glacier.
+	if archiveStatus == meta.ArchiveStatusCodeInProgress {
+		WriteErrorResponse(w, r, ErrRestoreAlreadyInProgress)
+		return
+	}
+
+	// Initiate a job to restore the object and return 202.
+	statusCode, err := api.ObjectAPI.RestoreObjectFromGlacier(r.Context(), bucketName, objectName, version, restoreRequest.Days, restoreRequest.Tier, credential)
+	if err != nil {
+		helper.Logger.Println(2, "[", reqId, "]", "RestoreObjectFromGlacier failed for req:",
+			bucketName, objectName, version, restoreRequest.Days, restoreRequest.Tier)
+		WriteErrorResponse(w, r, err)
+	}
+
+	// 200 for already restored and expand expire days, or 202 for initiate a new job
+	w.WriteHeader(statusCode)
+
+	return
 }

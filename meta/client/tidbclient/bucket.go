@@ -13,6 +13,9 @@ import (
 	. "github.com/journeymidnight/yig/meta/types"
 )
 
+const SECONDS_PER_DAY = 3600 * 24 // Seconds per day.
+const HOURS_PER_DAY	= 24
+
 func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
 	var acl, cors, lc, policy, createTime string
 	var updateTime sql.NullString
@@ -231,7 +234,7 @@ func (t *TidbClient) ListObjects(bucketName, marker, verIdMarker, prefix, delimi
 				n := strings.Index(subStr, delimiter)
 				if n != -1 {
 					prefixKey := prefix + string([]byte(subStr)[0:(n+1)])
-					marker = prefixKey[0:(len(prefixKey) - 1)] + string(delimiter[len(delimiter) - 1] + 1)
+					marker = prefixKey[0:(len(prefixKey)-1)] + string(delimiter[len(delimiter)-1]+1)
 					if prefixKey == omarker {
 						continue
 					}
@@ -337,4 +340,121 @@ func (t *TidbClient) UpdateUsages(usages map[string]int64, tx interface{}) error
 		}
 	}
 	return nil
+}
+
+func getExpireDuration(expireDays int64) (duration time.Duration, err error) {
+	if helper.CONFIG.LcDebug == false {
+		return time.ParseDuration(strconv.FormatInt((-1) * expireDays * HOURS_PER_DAY, 10) + "h")
+	} else {
+		return time.ParseDuration(strconv.FormatInt((-1) * expireDays, 10) + "s")
+	}
+}
+
+func (t *TidbClient) ListTransitionObjects(bucketName, marker, verIdMarker, prefix string, versioned bool, maxKeys int, expireDays int64) (retObjects []*Object, prefixes []string, truncated bool, nextMarker, nextVerIdMarker string, err error) {
+	const MaxObjectList = 1000
+	if versioned {
+		return // TODO should versioned in the future
+	}
+	expireDuration, err := getExpireDuration(expireDays)
+	if err != nil {
+		return
+	}
+	helper.Logger.Println(20, "[ Glacier ] ListTransitionObjects: ", bucketName, marker, verIdMarker, prefix, expireDays, expireDuration)
+	var count int
+	var exit bool
+	objectMap := make(map[string]struct{})
+	objectNum := make(map[string]int)
+	commonPrefixes := make(map[string]struct{})
+	omarker := marker
+	for {
+		var loopcount int
+		var sqltext string
+		var rows *sql.Rows
+		args := make([]interface{}, 0)
+		sqltext = "select bucketname,name,version,deletemarker from objects where bucketName=?"
+		args = append(args, bucketName)
+		if prefix != "" {
+			sqltext += " and name like ?"
+			args = append(args, prefix+"%")
+			helper.Debugln("query prefix:", prefix)
+		}
+		if marker != "" {
+			sqltext += " and name >= ?"
+			args = append(args, marker)
+			helper.Debugln("query marker:", marker)
+		}
+		sqltext += " and storageclass=0 and lastmodifiedtime<? order by bucketname,name,version limit ?"
+		args = append(args, time.Now().Add(expireDuration).Format(TIME_LAYOUT_TIDB))
+		args = append(args, MaxObjectList)
+		rows, err = t.Client.Query(sqltext, args...)
+		if err != nil {
+			return
+		}
+		helper.Logger.Println(10, "[ Glacier ] query sql:", sqltext)
+		defer rows.Close()
+		for rows.Next() {
+			loopcount += 1
+			//fetch related date
+			var bucketname, name string
+			var version uint64
+			var deletemarker bool
+			err = rows.Scan(
+				&bucketname,
+				&name,
+				&version,
+				&deletemarker,
+			)
+			if err != nil {
+				helper.Logger.Println(10, "1", err)
+				return
+			}
+			//prepare next marker
+			//TODU: be sure how tidb/mysql compare strings
+			if _, ok := objectNum[name]; !ok {
+				objectNum[name] = 0
+			}
+			objectNum[name] += 1
+			marker = name
+
+			if _, ok := objectMap[name]; !ok {
+				objectMap[name] = struct{}{}
+			} else {
+				continue
+			}
+			//filte by deletemarker
+			if deletemarker {
+				continue
+			}
+			if name == omarker {
+				continue
+			}
+
+			var o *Object
+			Strver := strconv.FormatUint(version, 10)
+			o, err = t.GetObject(bucketname, name, Strver)
+			if err != nil {
+				helper.Logger.Println(10, "2", err)
+				return
+			}
+			count += 1
+			if count == maxKeys {
+				nextMarker = name
+			}
+
+			if count > maxKeys {
+				truncated = true
+				exit = true
+				break
+			}
+			retObjects = append(retObjects, o)
+		}
+		if loopcount < MaxObjectList {
+			exit = true
+		}
+		if exit {
+			break
+		}
+	}
+	prefixes = helper.Keys(commonPrefixes)
+	return
 }

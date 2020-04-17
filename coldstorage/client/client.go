@@ -3,21 +3,19 @@ package client
 import (
 	"io"
 
-	"github.com/aws/aws-sdk-go/service/glacier"
+	"github.com/journeymidnight/yig/coldstorage/client/glacierclient"
 	. "github.com/journeymidnight/yig/coldstorage/types/glaciertype"
 	"github.com/journeymidnight/yig/log"
 )
 
-var Logger *log.Logger
-
 func InitiateColdstorageClient(logger *log.Logger) {
-	Logger = logger
+	glacierclient.InitiateGlacierClient(logger)
 }
 
 //Cold storage Client Interface
-type Client interface {
+type ClientAPI interface {
 	//archives
-	PutArchive(accountid, vaultname string, ioreadseeker io.ReadSeeker) (*string, error)
+	PutArchive(accountid, vaultname string, ioReader io.Reader) (string, error)
 	DeleteArchive(accountid string, archiveid string, vaultname string) error
 
 	//vaults
@@ -26,15 +24,23 @@ type Client interface {
 	DeleteVault(accountid string, vaultname string) error
 
 	//job
-	PostJob(accountid string, jobpara *glacier.JobParameters, vaultname string) (*string, error)
+	PostJob(accountid, vaultname, archiveid, snstopic, tier, outputbucket string) (string, error)
 	GetJobStatus(accountid string, jobid string, vaultname string) (*JobStatus, error)
 	GetJobOutput(accountid string, jobid string, vaultname string) (io.ReadCloser, error)
 
 	//multipart
-	CreateMultipart(accountid, partsize, vaultname string) (*string, error)
-	PutArchivePart(accountid, uploadid, vaultname, partrange string, ioreadseeker io.ReadSeeker) error
-	CompleteMultipartUpload(accountid, uploadid, vaultname string) (*string, error)
-	GetMultipartFromVault(accountid, vaultname string) ([]*glacier.UploadListElement, error)
-	GetMultipartFromArchive(accountid, uploadid, vaultname string) ([]*glacier.PartListElement, error)
-	AbortMultipart(accountid, uploadid, vaultname string) error
+	CreateMultipart(accountid, partsize, vaultname string) (string, error)
+	PutArchivePart(accountid, uploadid, vaultname, partrange string, ioReader io.Reader) error
+	CompleteMultipartUpload(accountid, uploadid, vaultname string) (string, error)
+	// GetMultipartFromVault(accountid, vaultname string) ([]*glacier.UploadListElement, error)
+	// GetMultipartFromArchive(accountid, uploadid, vaultname string) ([]*glacier.PartListElement, error)
+	DeleteMultipart(accountid, uploadid, vaultname string) error
+}
+
+type Client struct {
+	GlacierAPI ClientAPI
+}
+
+func NewClient(endpoint, region, ak, sk string) *Client {
+	return &Client{GlacierAPI: glacierclient.NewGlacierClient(endpoint, region, ak, sk)}
 }

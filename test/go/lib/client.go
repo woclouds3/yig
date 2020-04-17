@@ -13,6 +13,7 @@ type S3Client struct {
 
 const (
 	TEST_BUCKET = "mybucket"
+	TEST_INVALID_BUCKET = "archive-restore-bucket"
 	TEST_KEY    = "testput"
 	TEST_KEY_SPECIAL = "testputspecial:!@$%^&*()_+=-;?><| "
 	TEST_VALUE  = "valueput"

@@ -52,6 +52,12 @@ cache_circuit_open_threshold = 1
 # Ceph Config
 ceph_config_pattern = "/etc/ceph/*.conf"
 
+# Glacier Config
+enable_glacier = false
+glacier_host = ""
+glacier_region = "us-east-1"
+glacier_tier = "Standard"
+
 [kms]
 type = "vault"
 endpoint = "http://10.5.0.19:8200"

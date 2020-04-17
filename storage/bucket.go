@@ -120,7 +120,31 @@ func (yig *YigStorage) SetBucketLc(ctx context.Context, bucketName string, lc da
 		yig.Logger.Println(5, "[", helper.RequestIdFromContext(ctx), "]", "Error Put bucket to LC table: ", err)
 		return err
 	}
+
+	if isTransitionLc(&lc) {
+		if err = yig.MetaStorage.PutBucketToTransition(ctx, bucket); err != nil {
+			yig.Logger.Println(5, "[", helper.RequestIdFromContext(ctx), "]", "Error Put bucket to transition table: ", err)
+			return err
+		}
+	} else {
+		yig.MetaStorage.RemoveBucketFromTransition(ctx, bucket)
+	}
+
 	return nil
+}
+
+func isTransitionLc(lifeCycle *datatype.Lc) bool {
+	if lifeCycle == nil {
+		return false
+	}
+
+	for _, rule := range lifeCycle.Rule {
+		if rule.TransitionStorageClass == "GLACIER" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (yig *YigStorage) GetBucketLc(ctx context.Context, bucketName string, credential common.Credential) (lc datatype.Lc,
@@ -158,9 +182,15 @@ func (yig *YigStorage) DelBucketLc(ctx context.Context, bucketName string, crede
 	}
 	err = yig.MetaStorage.RemoveBucketFromLifeCycle(ctx, bucket)
 	if err != nil {
-		yig.Logger.Println(5, "[", helper.RequestIdFromContext(ctx), "]", "Error Remove bucket From LC table hbase: ", err)
+		yig.Logger.Println(5, "[", helper.RequestIdFromContext(ctx), "]", "Error Remove bucket From LC table: ", err)
 		return err
 	}
+
+	if err = yig.MetaStorage.RemoveBucketFromTransition(ctx, bucket); err != nil {
+		yig.Logger.Println(5, "[", helper.RequestIdFromContext(ctx), "]", "Error Remove bucket From transition table: ", err)
+		return err
+	}
+
 	return nil
 }
 

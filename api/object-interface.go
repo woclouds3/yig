@@ -95,4 +95,18 @@ type ObjectLayer interface {
 	AbortMultipartUpload(ctx context.Context, credential common.Credential, bucket, object, uploadID string) error
 	CompleteMultipartUpload(ctx context.Context, credential common.Credential, bucket, object, uploadID string,
 		uploadedParts []meta.CompletePart) (result datatype.CompleteMultipartResult, err error)
+
+	/*
+	 * For backend Glacier storage only now.
+	 * Only automatic transition to backend Glacier is supported now.
+	 */
+	CreateVault(ctx context.Context, credential common.Credential) error
+	DeleteVault(ctx context.Context, credential common.Credential) error
+
+	TransitObjectToGlacier(ctx context.Context, bucket *meta.Bucket, object *meta.Object) error
+	DeleteObjectFromGlacier(ctx context.Context, bucketName, objectName, objectId, ownerId string) error
+	RestoreObjectFromGlacier(ctx context.Context, bucketName, objectName, version string, restoreDays int64, tier string, credential common.Credential) (int, error)
+	GetArchiveStatus(ctx context.Context, bucketName, objectName, version string, credential common.Credential) (archiveStatus string, expireDate string, err error)
+	GetObjectFromGlacier(ctx context.Context, object *meta.Object, version string, startOffset, length int64, writer io.Writer, credential common.Credential) error
+	GetRestoredObjectName(ctx context.Context, object *meta.Object) string
 }
