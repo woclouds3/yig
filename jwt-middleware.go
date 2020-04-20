@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/dgrijalva/jwt-go"
-	"github.com/journeymidnight/yig/helper"
 	"net/http"
 	"strings"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/journeymidnight/yig/helper"
 )
 
 type JwtMiddleware struct {
@@ -16,7 +17,7 @@ type JwtMiddleware struct {
 func FromAuthHeader(r *http.Request) (string, error) {
 
 	authHeader, ok := r.Header["Authorization"]
-	helper.Logger.Println(5, "authHeader:", authHeader)
+	helper.Logger.Info(r.Context(), "authHeader:", authHeader)
 	if ok == false || authHeader[0] == "" {
 		return "", nil // No error, just no token
 	}

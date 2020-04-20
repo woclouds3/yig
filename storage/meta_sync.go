@@ -32,19 +32,19 @@ func metaSync(yig *YigStorage) {
 	}
 	for {
 		if yig.Stopping {
-			helper.Logger.Print(5, ".")
+			helper.Logger.Info(nil, ".")
 			// check whether all changed bucket usages are synced.
 			err := yig.MetaStorage.Sync(event)
 			if err != nil {
-				helper.Logger.Printf(2, "failed to perform bucket usage sync, err: %v", err)
+				helper.Logger.Error(nil, "failed to perform bucket usage sync, err:", err)
 			}
-			helper.Logger.Printf(5, "meta sync job stopped")
+			helper.Logger.Info(nil, "meta sync job stopped")
 			break
 		}
 
 		err := yig.MetaStorage.Sync(event)
 		if err != nil {
-			helper.Logger.Printf(2, "failed to perform bucket usage sync, err: %v", err)
+			helper.Logger.Error(nil, "failed to perform bucket usage sync, err:", err)
 		}
 
 		time.Sleep(5 * time.Second)

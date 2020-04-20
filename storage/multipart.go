@@ -18,9 +18,7 @@ import (
 	"github.com/journeymidnight/yig/helper"
 	"github.com/journeymidnight/yig/iam"
 	"github.com/journeymidnight/yig/iam/common"
-	obj "github.com/journeymidnight/yig/meta"
 	meta "github.com/journeymidnight/yig/meta/types"
-	"github.com/journeymidnight/yig/redis"
 	"github.com/journeymidnight/yig/signature"
 )
 
@@ -542,18 +540,16 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 
 	md5Writer := md5.New()
 	var totalSize int64 = 0
-	helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "Upload parts:", uploadedParts, "uploadId:", uploadId)
+	helper.Logger.Info(ctx, "Upload parts:", uploadedParts, "uploadId:", uploadId)
 	for i := 0; i < len(uploadedParts); i++ {
 		if uploadedParts[i].PartNumber != i+1 {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]",
-				"uploadedParts[i].PartNumber != i+1; i:", i, "uploadId:", uploadId)
+			helper.Logger.Info(ctx, "uploadedParts[i].PartNumber != i+1; i:", i, "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
 		}
 		part, ok := multipart.Parts[i+1]
 		if !ok {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]",
-				"multipart.Parts[i+1] does not exist; i:", i, "uploadId:", uploadId)
+			helper.Logger.Info(ctx, "multipart.Parts[i+1] does not exist; i:", i, "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
 		}
@@ -566,7 +562,7 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 			return
 		}
 		if part.Etag != uploadedParts[i].ETag {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]", "part.Etag != uploadedParts[i].ETag;",
+			helper.Logger.Info(ctx, "part.Etag != uploadedParts[i].ETag;",
 				"i:", i, "Etag:", part.Etag, "reqEtag:", uploadedParts[i].ETag, "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
@@ -574,8 +570,7 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 		var etagBytes []byte
 		etagBytes, err = hex.DecodeString(part.Etag)
 		if err != nil {
-			helper.Logger.Println(20, "[", helper.RequestIdFromContext(ctx), "]",
-				"hex.DecodeString(part.Etag) err;", "uploadId:", uploadId)
+			helper.Logger.Info(ctx, "hex.DecodeString(part.Etag) err;", "uploadId:", uploadId)
 			err = ErrInvalidPart
 			return
 		}
@@ -619,28 +614,16 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 		ObjectId:         oid,
 	}
 
-	var nullVerNum uint64
-	nullVerNum, err = yig.checkOldObject(ctx, bucketName, objectName, bucket.Versioning)
-	if err != nil {
+	if err = yig.checkOldObject(ctx, bucketName, objectName, bucket.Versioning, credential); err != nil {
 		return
 	}
+
+	if err = yig.MetaStorage.PutObject(ctx, object, &multipart, false); err != nil {
+		return
+	}
+
 	if bucket.Versioning == "Enabled" {
-		result.VersionId = object.GetVersionId()
-	}
-	// update null version number
-	if bucket.Versioning == "Suspended" {
-		nullVerNum = uint64(object.LastModifiedTime.UnixNano())
-	}
-
-	objMap := &meta.ObjMap{
-		Name:       objectName,
-		BucketName: bucketName,
-	}
-
-	if nullVerNum != 0 {
-		err = yig.MetaStorage.PutObject(ctx, object, &multipart, objMap, false)
-	} else {
-		err = yig.MetaStorage.PutObject(ctx, object, &multipart, nil, false)
+		result.VersionId = object.VersionId
 	}
 
 	//// Remove from multiparts table
@@ -656,10 +639,7 @@ func (yig *YigStorage) CompleteMultipartUpload(ctx context.Context, credential c
 	result.SseCustomerAlgorithm = sseRequest.SseCustomerAlgorithm
 	result.SseCustomerKeyMd5Base64 = base64.StdEncoding.EncodeToString(sseRequest.SseCustomerKey)
 
-	if err == nil {
-		yig.MetaStorage.Cache.Remove(redis.ObjectTable, obj.OBJECT_CACHE_PREFIX, bucketName+":"+objectName+":")
-		yig.DataCache.Remove(bucketName + ":" + objectName + ":" + object.GetVersionId())
-	}
+	yig.removeCache(bucketName, objectName, "")
 
 	return
 }

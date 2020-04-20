@@ -53,6 +53,9 @@ type Object struct {
 	Transitioning	int
 }
 
+const ObjectNullVersion = "null"
+const ObjectDefaultVersion = ""
+
 type ObjectType string
 
 const (
@@ -251,14 +254,15 @@ func (o *Object) GetVersionId() string {
 	if o.VersionId != "" {
 		return o.VersionId
 	}
-	timeData := []byte(strconv.FormatUint(uint64(o.LastModifiedTime.UnixNano()), 10))
+	timeData := []byte(strconv.FormatUint(math.MaxUint64-uint64(o.LastModifiedTime.UnixNano()), 10))
 	o.VersionId = hex.EncodeToString(xxtea.Encrypt(timeData, XXTEA_KEY))
 	return o.VersionId
 }
 
 //Tidb related function
 
-func (o *Object) GetCreateSql() (string, []interface{}) {
+// Object create sql, and return internal version, the same as in DB.
+func (o *Object) GetCreateSql() (string, []interface{}, uint64) {
 	version := math.MaxUint64 - uint64(o.LastModifiedTime.UnixNano())
 	customAttributes, _ := json.Marshal(o.CustomAttributes)
 	acl, _ := json.Marshal(o.ACL)
@@ -267,14 +271,14 @@ func (o *Object) GetCreateSql() (string, []interface{}) {
 	args := []interface{}{o.BucketName, o.Name, version, o.Location, o.Pool, o.OwnerId, o.Size, o.ObjectId,
 		lastModifiedTime, o.Etag, o.ContentType, customAttributes, acl, o.NullVersion, o.DeleteMarker,
 		o.SseType, o.EncryptionKey, o.InitializationVector, o.Type, o.StorageClass, o.Transitioning}
-	return sql, args
+	return sql, args, version
 }
 
-func (o *Object) GetAppendSql() (string, []interface{}) {
+func (o *Object) GetAppendSql(oldRawVersion string) (string, []interface{}) {
 	version := math.MaxUint64 - uint64(o.LastModifiedTime.UnixNano())
 	lastModifiedTime := o.LastModifiedTime.Format(TIME_LAYOUT_TIDB)
-	sql := "update objects set lastmodifiedtime=?, size=?, version=? where bucketname=? and name=?"
-	args := []interface{}{lastModifiedTime, o.Size, version, o.BucketName, o.Name}
+	sql := "update objects set lastmodifiedtime=?, size=?, version=? where bucketname=? and name=? and version=?"
+	args := []interface{}{lastModifiedTime, o.Size, version, o.BucketName, o.Name, oldRawVersion}
 	return sql, args
 }
 

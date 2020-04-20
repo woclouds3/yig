@@ -1,8 +1,9 @@
 package storage
 
 import (
-	"github.com/journeymidnight/yig/helper"
 	"time"
+
+	"github.com/journeymidnight/yig/helper"
 )
 
 // Remove
@@ -42,7 +43,7 @@ func removeFailed(yig *YigStorage) {
 			if err != nil {
 				object.triedTimes += 1
 				if object.triedTimes > MAX_TRY_TIMES {
-					helper.Logger.Println(5, "Failed to remove object in Ceph:",
+					helper.Logger.Warn(nil, "Failed to remove object in Ceph:",
 						object.location, object.pool, object.objectId,
 						"with error", err)
 					continue
@@ -52,7 +53,7 @@ func removeFailed(yig *YigStorage) {
 			}
 		default:
 			if yig.Stopping {
-				helper.Logger.Print(5, ".")
+				helper.Logger.Info(nil, ".")
 				if len(RecycleQueue) == 0 {
 					return
 				}

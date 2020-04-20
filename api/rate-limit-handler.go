@@ -17,10 +17,11 @@
 package api
 
 import (
-	"github.com/journeymidnight/yig/helper"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/journeymidnight/yig/helper"
 )
 
 var rateLimiter *rateLimit
@@ -61,7 +62,7 @@ func (l *rateLimit) ShutdownServer() {
 	for {
 		time.Sleep(1 * time.Second)
 		l.lock.Lock()
-		helper.Logger.Print(5, "Remaining requests:", l.currentRequests)
+		helper.Logger.Info(nil, "Remaining requests:", l.currentRequests)
 		if l.currentRequests == 0 {
 			// deliberately leave the lock locked
 			return

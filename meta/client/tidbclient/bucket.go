@@ -1,11 +1,13 @@
 package tidbclient
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
-	"strconv"
+	"fmt"
 	"strings"
 	"time"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 	. "github.com/journeymidnight/yig/error"
@@ -126,6 +128,10 @@ func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
 		}
 		buckets = append(buckets, &tmp)
 	}
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
 	return
 }
 
@@ -156,78 +162,127 @@ func (t *TidbClient) CheckAndPutBucket(bucket *Bucket) (bool, error) {
 	return processed, err
 }
 
-func (t *TidbClient) ListObjects(bucketName, marker, verIdMarker, prefix, delimiter string, versioned bool, maxKeys int) (retObjects []*Object, prefixes []string, truncated bool, nextMarker, nextVerIdMarker string, err error) {
-	const MaxObjectList = 1000
-	if versioned {
-		return
-	}
+// ListObjcts is called by both list objects and list object versions, controlled by versioned.
+func (t *TidbClient) ListObjects(ctx context.Context, bucketName, marker, verIdMarker, prefix, delimiter string, versioned bool, maxKeys int, withDeleteMarker bool) (retObjects []*Object, prefixes []string, truncated bool, nextMarker, nextVerIdMarker string, err error) {
+	const MaxObjectList = 10000
 	var count int
 	var exit bool
-	objectMap := make(map[string]struct{})
-	objectNum := make(map[string]int)
 	commonPrefixes := make(map[string]struct{})
 	omarker := marker
+	var lastListedVersion uint64
+
+	rawVersionIdMarker := ""
+	if versioned && verIdMarker != "" {
+		if verIdMarker == "null" {
+			var o *Object
+			if o, err = t.GetObject(bucketName, marker, "null"); err != nil {
+				return
+			}
+			verIdMarker = o.VersionId
+		}
+		if rawVersionIdMarker, err = ConvertS3VersionToRawVersion(verIdMarker); err != nil {
+			return
+		}
+	}
+
+	helper.Logger.Info(ctx, bucketName, marker, verIdMarker, prefix, delimiter, versioned, maxKeys, withDeleteMarker)
+
 	for {
 		var loopcount int
 		var sqltext string
 		var rows *sql.Rows
 		args := make([]interface{}, 0)
-		sqltext = "select bucketname,name,version,nullversion,deletemarker from objects where bucketName=?"
+
+		if !versioned {
+			// list objects, order by bucketname, name, version. So the latest will be returned.
+			sqltext = "select distinct bucketname,name from objects where bucketName=?"
+		} else {
+			// list object versions.
+			sqltext = "select bucketname,name,version from objects where bucketName=?"
+		}
 		args = append(args, bucketName)
 		if prefix != "" {
 			sqltext += " and name like ?"
 			args = append(args, prefix+"%")
-			helper.Debugln("query prefix:", prefix)
+			helper.Logger.Info(ctx, "query prefix:", prefix)
 		}
 		if marker != "" {
-			sqltext += " and name >= ?"
-			args = append(args, marker)
-			helper.Debugln("query marker:", marker)
+			if !versioned {
+				// list objects.
+				sqltext += " and name >= ?"
+				args = append(args, marker)
+				helper.Logger.Info(ctx, "query marker:", marker)
+			} else {
+				// list object versions.
+				if rawVersionIdMarker == "" {
+					// First time to list the object after marker versions, excluding marker because it's listed before.
+					sqltext += " and name > ?"
+					args = append(args, marker)
+				} else {
+					// Not first time to list marker. Just start from marker, excluding verIdMarker.
+					sqltext += " and name = ? and version > ?"
+					args = append(args, marker)
+					args = append(args, rawVersionIdMarker)
+				}
+				helper.Logger.Info(ctx, "query marker for versioned:", marker, rawVersionIdMarker)
+			}
 		}
-		sqltext += " order by bucketname,name,version limit ?"
-		args = append(args, MaxObjectList)
+		if delimiter == "" {
+			sqltext += " order by bucketname,name,version limit ?"
+			args = append(args, MaxObjectList)
+		} else {
+			num := len(strings.Split(prefix, delimiter))
+			args = append(args, delimiter, num, MaxObjectList)
+			sqltext += " group by SUBSTRING_INDEX(name, ?, ?) order by bucketname, name,version limit ?"
+		}
+		tstart := time.Now()
 		rows, err = t.Client.Query(sqltext, args...)
 		if err != nil {
 			return
 		}
-		helper.Debugln("query sql:", sqltext)
+		tqueryend := time.Now()
+		tdur := tqueryend.Sub(tstart).Nanoseconds()
+		if tdur/1000000 > 5000 {
+			helper.Logger.Info(ctx, fmt.Sprintf("slow list objects query: %s,args: %v, takes %d", sqltext, args, tdur))
+		}
+
+		helper.Logger.Info(ctx, "query sql:", sqltext, "args:", args)
+
 		defer rows.Close()
 		for rows.Next() {
 			loopcount += 1
 			//fetch related date
 			var bucketname, name string
-			var version uint64
-			var nullversion, deletemarker bool
-			err = rows.Scan(
-				&bucketname,
-				&name,
-				&version,
-				&nullversion,
-				&deletemarker,
-			)
+			var version uint64 // Internal version, the same as in DB.
+			var s3VersionId string
+			if !versioned {
+				err = rows.Scan(
+					&bucketname,
+					&name,
+				)
+				s3VersionId = "" // Get default object later.
+			} else {
+				err = rows.Scan(
+					&bucketname,
+					&name,
+					&version,
+				)
+				s3VersionId = ConvertRawVersionToS3Version(version)
+			}
 			if err != nil {
+				helper.Logger.Error(ctx, "rows.Scan() err:", err)
 				return
 			}
+			helper.Logger.Info(ctx, bucketname, name, version)
+
 			//prepare next marker
 			//TODU: be sure how tidb/mysql compare strings
-			if _, ok := objectNum[name]; !ok {
-				objectNum[name] = 0
-			}
-			objectNum[name] += 1
 			marker = name
 
-			if _, ok := objectMap[name]; !ok {
-				objectMap[name] = struct{}{}
-			} else {
+			if !versioned && name == omarker {
 				continue
 			}
-			//filte by deletemarker
-			if deletemarker {
-				continue
-			}
-			if name == omarker {
-				continue
-			}
+
 			//filte by delemiter
 			if len(delimiter) != 0 {
 				subStr := strings.TrimPrefix(name, prefix)
@@ -251,15 +306,22 @@ func (t *TidbClient) ListObjects(bucketName, marker, verIdMarker, prefix, delimi
 					continue
 				}
 			}
+
 			var o *Object
-			Strver := strconv.FormatUint(version, 10)
-			o, err = t.GetObject(bucketname, name, Strver)
+			o, err = t.GetObject(bucketname, name, s3VersionId)
 			if err != nil {
+				helper.Logger.Error(nil, fmt.Sprintf("ListObjects: failed to GetObject(%s, %s, %s), err: %v", bucketname, name, ConvertRawVersionToS3Version(version), err))
 				return
 			}
+			if o.DeleteMarker && !withDeleteMarker {
+				// list objects, skip DeleteMarker.
+				continue
+			}
+
 			count += 1
 			if count == maxKeys {
 				nextMarker = name
+				lastListedVersion = version
 			}
 
 			if count > maxKeys {
@@ -267,8 +329,26 @@ func (t *TidbClient) ListObjects(bucketName, marker, verIdMarker, prefix, delimi
 				exit = true
 				break
 			}
+
 			retObjects = append(retObjects, o)
 		}
+		tfor := time.Now()
+		tdur = tfor.Sub(tqueryend).Nanoseconds()
+		if tdur/1000000 > 5000 {
+			helper.Logger.Info(nil, "slow list get objects, takes", tdur)
+		}
+
+		if versioned {
+			// Looped all the versions in the marker.
+			// Start from next object name.
+			helper.Logger.Info(ctx, "Looped all the versions for", bucketName, marker, rawVersionIdMarker)
+
+			if !exit && rawVersionIdMarker != "" {
+				rawVersionIdMarker = ""
+				continue
+			}
+		}
+
 		if loopcount < MaxObjectList {
 			exit = true
 		}
@@ -277,6 +357,9 @@ func (t *TidbClient) ListObjects(bucketName, marker, verIdMarker, prefix, delimi
 		}
 	}
 	prefixes = helper.Keys(commonPrefixes)
+	if versioned && lastListedVersion != 0 {
+		nextVerIdMarker = ConvertRawVersionToS3Version(lastListedVersion)
+	}
 	return
 }
 
@@ -310,7 +393,7 @@ func (t *TidbClient) UpdateUsage(bucketName string, size int64, tx interface{}) 
 	return
 }
 
-func (t *TidbClient) UpdateUsages(usages map[string]int64, tx interface{}) error {
+func (t *TidbClient) UpdateBucketInfo(usages map[string]*BucketInfo, tx interface{}) error {
 	var sqlTx *sql.Tx
 	var err error
 	if nil == tx {
@@ -324,18 +407,20 @@ func (t *TidbClient) UpdateUsages(usages map[string]int64, tx interface{}) error
 		}()
 	}
 	sqlTx, _ = tx.(*sql.Tx)
-	sqlStr := "update buckets set usages = ? where bucketname = ?;"
+	sqlStr := "update buckets set usages = ?, fileNum = ? where bucketname = ?;"
 	st, err := sqlTx.Prepare(sqlStr)
 	if err != nil {
-		helper.Logger.Println(2, "failed to prepare statment with sql: ", sqlStr, ", err: ", err)
+		helper.Logger.Error(nil, fmt.Sprintf("UpdateBucketInfo: failed to prepare statement: %s, err: %v",
+			sqlStr, err))
 		return err
 	}
 	defer st.Close()
 
-	for bucket, usage := range usages {
-		_, err = st.Exec(usage, bucket)
+	for bucket, info := range usages {
+		_, err = st.Exec(info.Usage, info.FileNum, bucket)
 		if err != nil {
-			helper.Logger.Println(2, "failed to update usage for bucket: ", bucket, " with usage: ", usage, ", err: ", err)
+			helper.Logger.Error(nil, fmt.Sprintf("UpdateBucketInfo: failed to update bucket info for bucket %s, with usage: %d, fileNum: %d, err: %v",
+				bucket, info.Usage, info.FileNum, err))
 			return err
 		}
 	}
@@ -359,7 +444,7 @@ func (t *TidbClient) ListTransitionObjects(bucketName, marker, verIdMarker, pref
 	if err != nil {
 		return
 	}
-	helper.Logger.Println(20, "[ Glacier ] ListTransitionObjects: ", bucketName, marker, verIdMarker, prefix, expireDays, expireDuration)
+	helper.Logger.Info(nil, bucketName, marker, verIdMarker, prefix, expireDays, expireDuration)
 	var count int
 	var exit bool
 	objectMap := make(map[string]struct{})
@@ -376,12 +461,12 @@ func (t *TidbClient) ListTransitionObjects(bucketName, marker, verIdMarker, pref
 		if prefix != "" {
 			sqltext += " and name like ?"
 			args = append(args, prefix+"%")
-			helper.Debugln("query prefix:", prefix)
+			helper.Logger.Info(nil, "query prefix:", prefix)
 		}
 		if marker != "" {
 			sqltext += " and name >= ?"
 			args = append(args, marker)
-			helper.Debugln("query marker:", marker)
+			helper.Logger.Info(nil, "query marker:", marker)
 		}
 		sqltext += " and storageclass=0 and lastmodifiedtime<? order by bucketname,name,version limit ?"
 		args = append(args, time.Now().Add(expireDuration).Format(TIME_LAYOUT_TIDB))
@@ -390,7 +475,7 @@ func (t *TidbClient) ListTransitionObjects(bucketName, marker, verIdMarker, pref
 		if err != nil {
 			return
 		}
-		helper.Logger.Println(10, "[ Glacier ] query sql:", sqltext)
+		helper.Logger.Info(nil, "[ Glacier ] query sql:", sqltext)
 		defer rows.Close()
 		for rows.Next() {
 			loopcount += 1
@@ -457,4 +542,35 @@ func (t *TidbClient) ListTransitionObjects(bucketName, marker, verIdMarker, pref
 	}
 	prefixes = helper.Keys(commonPrefixes)
 	return
+}
+
+func (t *TidbClient) GetAllBucketInfo() (map[string]*BucketInfo, error) {
+	query := "select bucketname, count(objectid) as fileNum, sum(size) as usages from objects group by bucketname;"
+	rows, err := t.Client.Query(query)
+	if err != nil {
+		helper.Logger.Error(nil, fmt.Sprintf("failed to query(%s), err: %v", query, err))
+		return nil, err
+	}
+
+	infos := make(map[string]*BucketInfo)
+	defer rows.Close()
+	for rows.Next() {
+		bi := &BucketInfo{}
+		err = rows.Scan(
+			&bi.BucketName,
+			&bi.FileNum,
+			&bi.Usage,
+		)
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to scan for query(%s), err: %v", query, err))
+			return nil, err
+		}
+		infos[bi.BucketName] = bi
+	}
+	err = rows.Err()
+	if err != nil {
+		helper.Logger.Error(nil, fmt.Sprintf("failed to iterator rows for query(%s), err: %v", query, err))
+		return nil, err
+	}
+	return infos, nil
 }

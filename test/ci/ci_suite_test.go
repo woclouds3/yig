@@ -1,7 +1,6 @@
 package ci
 
 import (
-	"os"
 	"testing"
 
 	"github.com/journeymidnight/yig/helper"
@@ -17,22 +16,16 @@ type CISuite struct {
 	// this YigStorage is readonly.
 	// we create it just for verify data.
 	storage *storage.YigStorage
-	logf    *os.File
 }
 
 var _ = Suite(&CISuite{})
 
-var logger *log.Logger
+var logger log.Logger
 
 func (cs *CISuite) SetUpSuite(c *C) {
-	var err error
 	helper.SetupConfig()
-	cs.logf, err = os.OpenFile("./yig_test.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		c.Fatalf("cannot create yig_test.log, err: %v", err)
-	}
-
-	logger := log.New(cs.logf, "[yig]", log.LstdFlags, helper.CONFIG.LogLevel)
+	logLevel := log.ParseLevel("DEBUG")
+	logger = log.NewFileLogger("./ci.log", logLevel)
 	helper.Logger = logger
 	if helper.CONFIG.MetaCacheType > 0 || helper.CONFIG.EnableDataCache {
 		redis.Initialize()
@@ -43,5 +36,4 @@ func (cs *CISuite) SetUpSuite(c *C) {
 
 func (cs *CISuite) TearDownSuite(c *C) {
 	cs.storage.Stop()
-	cs.logf.Close()
 }

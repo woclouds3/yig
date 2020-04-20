@@ -1,9 +1,9 @@
 package meta
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"context"
 
 	. "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
@@ -67,7 +67,7 @@ func (m *Meta) GetUserBuckets(ctx context.Context, userId string, willNeed bool)
 
 	bnl, ok := bs.(*BucketNameList)
 	if !ok {
-		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "Cast bs failed:", bs)
+		helper.Logger.Error(ctx, "Cast bs failed:", bs)
 		err = ErrInternalError
 		return
 	}

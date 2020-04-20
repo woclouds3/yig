@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -114,7 +115,15 @@ func (h resourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Skip the first element which is usually '/' and split the rest.
 	tstart := time.Now()
 	bucketName, objectName := GetBucketAndObjectInfoFromRequest(r)
-	helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "ServeHTTP", bucketName, objectName)
+	helper.Logger.Info(r.Context(), "ServeHTTP", bucketName, objectName, "Hostname:", strings.Split(r.Host, ":"))
+
+	// Check host name with configuration.
+	if isValidHostName(r) == false {
+		helper.Logger.Error(r.Context(), "resourceHandler invalid host name. Host:", r.Host)
+		WriteErrorResponse(w, r, ErrAccessDenied)
+		return
+	}
+
 	// If bucketName is present and not objectName check for bucket
 	// level resource queries.
 	if bucketName != "" && objectName == "" {
@@ -132,7 +141,7 @@ func (h resourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// A put method on path "/" doesn't make sense, ignore it.
 	if r.Method == "PUT" && r.URL.Path == "/" && bucketName == "" {
-		helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Host:", r.Host, "Path:", r.URL.Path, "Bucket:", bucketName)
+		helper.Logger.Error(r.Context(), "Host:", r.Host, "Path:", r.URL.Path, "Bucket:", bucketName)
 		WriteErrorResponse(w, r, ErrMethodNotAllowed)
 		return
 	}
@@ -140,7 +149,7 @@ func (h resourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tend := time.Now()
 	dur := tend.Sub(tstart).Nanoseconds() / 1000000
 	if dur >= 100 {
-		helper.Logger.Printf(5, "slow log resouce_handler(%s, %s) spent %d", bucketName, objectName, dur)
+		helper.Logger.Info(r.Context(), fmt.Sprintf("slow log resouce_handler(%s, %s) spent %d", bucketName, objectName, dur))
 	}
 }
 
@@ -192,7 +201,7 @@ func (h GenerateContextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	tstart := time.Now()
 	requestId := string(helper.GenerateRandomId())
 	bucketName, objectName := GetBucketAndObjectInfoFromRequest(r)
-	helper.Logger.Println(20, "[", requestId, "]", "GenerateContextHandler. RequestId:", requestId, "BucketName:", bucketName, "ObjectName:", objectName)
+	helper.Logger.Info(nil, "GenerateContextHandler. RequestId:", requestId, "BucketName:", bucketName, "ObjectName:", objectName)
 
 	ctx := context.WithValue(r.Context(), "RequestId", requestId)
 
@@ -216,7 +225,7 @@ func (h GenerateContextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	tend := time.Now()
 	dur := tend.Sub(tstart).Nanoseconds() / 1000000
 	if dur >= 100 {
-		helper.Logger.Printf(5, "slow log: generic_context(%s, %s) spent %d", bucketName, objectName, dur)
+		helper.Logger.Info(ctx, fmt.Sprintf("slow log: generic_context(%s, %s) spent %d", bucketName, objectName, dur))
 	}
 
 }
@@ -288,6 +297,7 @@ var notimplementedBucketResourceNames = map[string]bool{
 // List of not implemented object queries
 var notimplementedObjectResourceNames = map[string]bool{
 	"torrent": true,
+	"tagging": true,
 }
 
 func GetBucketAndObjectInfoFromRequest(r *http.Request) (bucketName string, objectName string) {
@@ -309,4 +319,27 @@ func GetBucketAndObjectInfoFromRequest(r *http.Request) (bucketName string, obje
 		}
 	}
 	return
+}
+
+func isValidHostName(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+
+	v := strings.Split(r.Host, ":")
+	hostWithOutPort := v[0]
+
+	for _, d := range helper.CONFIG.S3Domain {
+		// Host style, like "bucketname.s3.test.com" .
+		if strings.HasSuffix(hostWithOutPort, "."+d) {
+			return true
+		}
+
+		// Path style, like "s3.test.com" .
+		if hostWithOutPort == d {
+			return true
+		}
+	}
+
+	return false
 }

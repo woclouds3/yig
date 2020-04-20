@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -64,14 +65,14 @@ func (a AccessLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 	response := newReplacer.Replace(a.format)
 
-	helper.AccessLogger.Println(20, response)
+	helper.AccessLogger.Println(response)
 	// send the entrys in access logger to message bus.
 	elems := newReplacer.GetReplacedValues()
 	a.notify(elems)
 	tend := time.Now()
 	dur := tend.Sub(tstart).Nanoseconds() / 1000000
 	if dur >= 100 {
-		helper.Logger.Printf(5, "slow log: access_log_handler(%s) spent %d", response, dur)
+		helper.Logger.Warn(r.Context(), "slow log: access_log_handler(", response, ") spent %d", dur)
 	}
 }
 
@@ -84,13 +85,15 @@ func (a AccessLogHandler) notify(elems map[string]string) {
 	}
 	val, err := helper.MsgPackMarshal(elems)
 	if err != nil {
-		helper.Logger.Printf(2, "failed to pack %v, err: %v", elems, err)
+		helper.Logger.Error(nil,
+			fmt.Sprintf("Failed to send message [%v] to message bus, err: %v",
+				elems, err))
 		return
 	}
 
 	sender, err := bus.GetMessageSender()
 	if err != nil {
-		helper.Logger.Printf(2, "failed to get message bus sender, err: %v", err)
+		helper.Logger.Error(nil, "failed to get message bus sender, err:", err)
 		return
 	}
 
@@ -105,10 +108,10 @@ func (a AccessLogHandler) notify(elems map[string]string) {
 
 	err = sender.AsyncSend(msg)
 	if err != nil {
-		helper.Logger.Printf(2, "failed to send message [%v] to message bus, err: %v", elems, err)
+		helper.Logger.Error(nil, fmt.Sprintf("failed to send message [%v] to message bus, err: %v", elems, err))
 		return
 	}
-	helper.Logger.Printf(20, "succeed to send message [%v] to message bus.", elems)
+	helper.Logger.Info(nil, fmt.Sprintf("Succeed to send message [%v] to message bus.", elems))
 }
 
 func NewAccessLogHandler(handler http.Handler, _ *meta.Meta) http.Handler {
