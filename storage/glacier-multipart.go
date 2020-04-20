@@ -147,10 +147,10 @@ func (b *PartReaderBuilder) getReader() io.ReadCloser {
 // Convert (Glacier part) offset to Object.offset, and find corresonding (S3) part to do read.
 // (Seems aws-sdk read 1M for hash or 4096 byte for Body to send.)
 func (r *PartReader) Read(p []byte) (int, error) {
-	//helper.Logger.Printf(20, "[ ] enter Read %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
+	//helper.Logger.Info(nil, "[ ] enter Read %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
 
 	if r.offset >= r.size || r.currentS3PartIndex > len(*(r.s3Parts)) {
-		helper.Logger.Printf(20, "[ ] leave Read 1 %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
+		helper.Logger.Info(nil, "[ ] leave Read 1 %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
 		return 0, io.EOF
 	}
 
@@ -163,7 +163,7 @@ func (r *PartReader) Read(p []byte) (int, error) {
 
 	count, err := r.readAndCloseFromS3Part(p, r.currentS3PartIndex, s3ObjectOffset)
 	if count == 0 && err != nil {
-		helper.Logger.Printf(20, "[ ] leave Read 2 %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
+		helper.Logger.Info(nil, "[ ] leave Read 2 %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
 		return 0, err
 	}
 
@@ -172,7 +172,7 @@ func (r *PartReader) Read(p []byte) (int, error) {
 	partEndOffset, err := r.getEndOffsetInObject(r.currentS3PartIndex)
 	if err != nil || s3ObjectOffset > (partEndOffset + 1) {
 		// Should not happen. Should not happen if it increase bigger than 1 part.
-		helper.Logger.Printf(20, "[ ] leave Read 3 %p len %d r.offset %d / %d index %d / %d s3ObjectOffset %d err %v", 
+		helper.Logger.Info(nil, "[ ] leave Read 3 %p len %d r.offset %d / %d index %d / %d s3ObjectOffset %d err %v", 
 			p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex, s3ObjectOffset, err)
 		return 0, io.EOF
 	}
@@ -182,7 +182,7 @@ func (r *PartReader) Read(p []byte) (int, error) {
 
 	r.offset += int64(count)  // In last part, it's possible bigger than r.size
 
-	//helper.Logger.Printf(20, "[ ] leave Read %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
+	//helper.Logger.Info(nil, "[ ] leave Read %p len %d r.offset %d / %d index %d / %d", p, len(p), r.offset, r.startS3ObjectOffset, r.currentS3PartIndex,r.startS3PartIndex)
 
 	return count, err
 }
@@ -195,7 +195,7 @@ func (r *PartReader) reset() {
 // Only move the offset and currentS3PartIndex in PartReader, won't connect Ceph.
 func (r *PartReader) Seek(offset int64, whence int) (int64, error) {
 	// In current test, only Seek(0, 0) called by AWS.
-	// helper.Logger.Printf(20, "[ ] enter Seek %d %d", offset, whence)
+	// helper.Logger.Info(nil, "[ ] enter Seek %d %d", offset, whence)
 
 	switch whence {
 	case 0:
@@ -228,13 +228,13 @@ func (r *PartReader) Seek(offset int64, whence int) (int64, error) {
 
 	r.offset = offset
 
-	helper.Logger.Printf(20, "[ ] leave Seek offset %d size: %d index %d / %d", r.offset, r.size, r.currentS3PartIndex, r.startS3PartIndex)
+	helper.Logger.Info(nil, "[ ] leave Seek offset %d size: %d index %d / %d", r.offset, r.size, r.currentS3PartIndex, r.startS3PartIndex)
 
 	return r.offset, nil
 }
 
 func (r *PartReader) Len() int {
-	helper.Logger.Printf(10, "[ ] enter Len() offset %d size %d", r.offset, r.size)
+	helper.Logger.Info(nil, "[ ] enter Len() offset %d size %d", r.offset, r.size)
 
 	if r.offset >= r.size {
 		return 0
@@ -252,16 +252,16 @@ func (r *PartReader) Close() error {
 }
 
 func (r *PartReader) readAndCloseFromS3Part(p []byte, s3PartIndex int, s3ObjectOffset int64) (int, error) {
-	//helper.Logger.Printf(20, "[ ] enter readAndCloseFromS3Part %p %d %d", p, s3PartIndex, s3ObjectOffset)
+	//helper.Logger.Info(nil, "[ ] enter readAndCloseFromS3Part %p %d %d", p, s3PartIndex, s3ObjectOffset)
 
 	if s3PartIndex > len(*(r.s3Parts)) {
-		helper.Logger.Printf(20, "err in readAndCloseFromS3Part 1 %d", s3PartIndex)
+		helper.Logger.Info(nil, "err in readAndCloseFromS3Part 1 %d", s3PartIndex)
 		return 0, io.EOF
 	}
 
 	part, ok := (*(r.s3Parts))[s3PartIndex]
 	if !ok {
-		helper.Logger.Printf(20, "err in readAndCloseFromS3Part 2 %d %t %v", s3PartIndex, ok, (*(r.s3Parts)))
+		helper.Logger.Info(nil, "err in readAndCloseFromS3Part 2 %d %t %v", s3PartIndex, ok, (*(r.s3Parts)))
 		return 0, io.EOF
 	}
 
@@ -274,7 +274,7 @@ func (r *PartReader) readAndCloseFromS3Part(p []byte, s3PartIndex int, s3ObjectO
 	defer ioReadCloser.Close()
 
 	if err != nil {
-		helper.Logger.Printf(10, "[ ] err in cephCluster.getReader for pool %s part[%d] %s offset %d length %d",
+		helper.Logger.Error(nil, "[ ] err in cephCluster.getReader for pool %s part[%d] %s offset %d length %d",
 			BIG_FILE_POOLNAME, s3PartIndex, part.ObjectId, partStartOffset,
 			part.Size-partStartOffset)
 		return 0, err
@@ -286,10 +286,10 @@ func (r *PartReader) readAndCloseFromS3Part(p []byte, s3PartIndex int, s3ObjectO
 	}
 	count, err := ioReadCloser.Read(p)
 	if err != nil { // TODO
-		helper.Logger.Printf(20, "[ ] err in readAndCloseFromS3Part err %s", err)
+		helper.Logger.Info(nil, "[ ] err in readAndCloseFromS3Part err %s", err)
 	}
 	if count > len {
-		helper.Logger.Printf(10, "[ ] err in readAndCloseFromS3Part count %d > len %d", count, len)
+		helper.Logger.Error(nil, "[ ] err in readAndCloseFromS3Part count %d > len %d", count, len)
 		return 0, io.EOF
 	}
 

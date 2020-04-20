@@ -254,9 +254,6 @@ CREATE TABLE `transition` (
   UNIQUE KEY (`bucketname`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
-ALTER TABLE buckets
-ADD COLUMN update_time datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
-
 DROP TABLE IF EXISTS `archives`;
 CREATE TABLE `archives` (
   `bucketname` varchar(255) DEFAULT NULL,
@@ -267,3 +264,8 @@ CREATE TABLE `archives` (
   `expiredays` bigint(20) DEFAULT NULL,
   UNIQUE KEY `rowkey` (`bucketname`,`objectname`,`objectid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+
+ALTER TABLE buckets
+ADD COLUMN update_time datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+
+ALTER TABLE buckets ADD COLUMN fileNum bigint(20) DEFAULT 0 AFTER usages; 

@@ -3,11 +3,12 @@ package meta
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	. "github.com/journeymidnight/yig/error"
+	errs "github.com/journeymidnight/yig/error"
 	"github.com/journeymidnight/yig/helper"
-	. "github.com/journeymidnight/yig/meta/types"
+	"github.com/journeymidnight/yig/meta/types"
 	"github.com/journeymidnight/yig/redis"
 )
 
@@ -18,15 +19,14 @@ const (
 
 // Note the usage info got from this method is possibly not accurate because we don't
 // invalid cache when updating usage. For accurate usage info, use `GetUsage()`
-func (m *Meta) GetBucket(ctx context.Context, bucketName string, willNeed bool) (bucket *Bucket, err error) {
+func (m *Meta) GetBucket(ctx context.Context, bucketName string, willNeed bool) (bucket *types.Bucket, err error) {
 	getBucket := func() (b helper.Serializable, err error) {
 		b, err = m.Client.GetBucket(bucketName)
-		helper.Logger.Println(10, "[", helper.RequestIdFromContext(ctx), "]",
-			"GetBucket CacheMiss. bucket:", bucketName)
+		helper.Logger.Info(ctx, "GetBucket CacheMiss. bucket:", bucketName)
 		return b, err
 	}
 	toBucket := func(fields map[string]string) (interface{}, error) {
-		b := &Bucket{}
+		b := &types.Bucket{}
 		return b.Deserialize(fields)
 	}
 
@@ -34,67 +34,100 @@ func (m *Meta) GetBucket(ctx context.Context, bucketName string, willNeed bool) 
 	if err != nil {
 		return
 	}
-	bucket, ok := b.(*Bucket)
+	bucket, ok := b.(*types.Bucket)
 	if !ok {
-		helper.Debugln("[", helper.RequestIdFromContext(ctx), "]", "Cast b failed:", b)
-		err = ErrInternalError
+		helper.Logger.Error(ctx, "Cast b failed:", b)
+		err = errs.ErrInternalError
 		return
 	}
 	return bucket, nil
 }
 
-func (m *Meta) GetBuckets() (buckets []*Bucket, err error) {
-	buckets, err = m.Client.GetBuckets()
-	return
+func (m *Meta) GetBuckets() (buckets []*types.Bucket, err error) {
+	// try to get buckets from cache first, if fails, get them from db.
+	// try to get all bucket usage keys from cache.
+	pattern := fmt.Sprintf("%s*", BUCKET_CACHE_PREFIX)
+	bucketsInCache, err := m.Cache.Keys(redis.BucketTable, pattern)
+	if err != nil {
+		// failed to get buckets from cache, try to get them from db.
+		helper.Logger.Error(nil, fmt.Sprintf("failed to get bucket usage from cache, err: %v", err))
+		buckets, err = m.Client.GetBuckets()
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get bucket usage from db, err: %v", err))
+			return nil, err
+		}
+		return buckets, nil
+	}
+	// deserialize the buckets info saved in cache.
+	for _, bic := range bucketsInCache {
+		elems := strings.Split(bic, ":")
+		name := bic
+		if len(elems) > 0 {
+			name = elems[1]
+		}
+		cacheElems, err := m.Cache.HGetAll(redis.BucketTable, BUCKET_CACHE_PREFIX, name)
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get buckets info for bucket: %s, err: %v", name, err))
+			continue
+		}
+		bu := &types.Bucket{}
+		_, err = bu.Deserialize(cacheElems)
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to deserialize the bucket info for bucket: %s, err: %v", name, err))
+			continue
+		}
+		buckets = append(buckets, bu)
+	}
+	return buckets, nil
 }
 
-func (m *Meta) UpdateUsage(ctx context.Context, bucketName string, size int64) error {
-	requestId := helper.RequestIdFromContext(ctx)
+func (m *Meta) UpdateBucketInfo(ctx context.Context, bucketName string, field string, size int64) error {
 	tstart := time.Now()
-	usage, err := m.Cache.HIncrBy(redis.BucketTable, BUCKET_CACHE_PREFIX, bucketName, FIELD_NAME_USAGE, size)
+
+	newSize, err := m.Cache.HIncrBy(redis.BucketTable, BUCKET_CACHE_PREFIX, bucketName, field, size)
 	if err != nil {
-		helper.Logger.Println(2, fmt.Sprintf("[ %s ] failed to update bucket[%s] usage by %d, err: %v",
-			requestId, bucketName, size, err))
+		helper.Logger.Error(ctx, fmt.Sprintf("failed to update bucket[%s] %s by %d, err: %v",
+			bucketName, field, size, err))
 		return err
 	}
 	tinc := time.Now()
 	dur := tinc.Sub(tstart)
 	if dur/1000000 >= 100 {
-		helper.Logger.Printf(5, "[ %s ] slow log: RedisIncrBy: bucket: %s, size: %d, takes: %d",
-			requestId, bucketName, size, dur)
+		helper.Logger.Warn(ctx, fmt.Sprintf("slow log: RedisIncrBy: bucket: %s, size: %d, takes: %d",
+			bucketName, size, dur))
 	}
 
-	err = m.addBucketUsageSyncEvent(bucketName)
+	err = m.addBucketInfoSyncEvent(bucketName)
 	if err != nil {
-		helper.Logger.Printf(2, "[ %s ] failed to add bucket usage sync event for bucket: %s, err: %v",
-			requestId, bucketName, err)
+		helper.Logger.Error(ctx, fmt.Sprintf("failed to add bucket %s sync event for bucket: %s, err: %v",
+			field, bucketName, err))
 		return err
 	}
-	helper.Logger.Println(15, "[", requestId, "]", "incr usage for bucket: ", bucketName, ", updated to ", usage)
+	helper.Logger.Info(ctx, fmt.Sprintf("incr %s for bucket %s, now: %d", field, bucketName, newSize))
 	tend := time.Now()
 	dur = tend.Sub(tinc)
 	if dur/1000000 >= 100 {
-		helper.Logger.Printf(5, "[ %s ] slow log: AddBucketUsageSyncEvent: bucket: %s, size: %d, takes: %d",
-			requestId, bucketName, size, dur)
+		helper.Logger.Error(ctx, fmt.Sprintf("slow log: AddBucketInfoSyncEvent: bucket: %s, size: %d, takes: %d",
+			bucketName, size, dur))
 	}
 	dur = tend.Sub(tstart)
 	if dur/1000000 >= 100 {
-		helper.Logger.Printf(5, "[ %s ] slow log: cache update, bucket: %s, size: %d, takes: %d",
-			requestId, bucketName, size, dur)
+		helper.Logger.Error(ctx, fmt.Sprintf("slow log: cache update, bucket: %s, size: %d, takes: %d",
+			bucketName, size, dur))
 	}
 	return nil
 }
 
 func (m *Meta) GetUsage(ctx context.Context, bucketName string) (int64, error) {
-	usage, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, bucketName, FIELD_NAME_USAGE)
+	usage, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, bucketName, types.FIELD_NAME_USAGE)
 	if err != nil {
-		helper.Logger.Println(2, "[", helper.RequestIdFromContext(ctx), "]", "failed to get usage for bucket: ", bucketName, ", err: ", err)
+		helper.Logger.Info(ctx, "failed to get usage for bucket: ", bucketName, ", err: ", err)
 		return 0, err
 	}
 	return usage, nil
 }
 
-func (m *Meta) GetBucketInfo(ctx context.Context, bucketName string) (*Bucket, error) {
+func (m *Meta) GetBucketInfo(ctx context.Context, bucketName string) (*types.Bucket, error) {
 	m.Cache.Remove(redis.BucketTable, BUCKET_CACHE_PREFIX, bucketName)
 	bucket, err := m.GetBucket(ctx, bucketName, true)
 	if err != nil {
@@ -118,13 +151,13 @@ func (m *Meta) GetUserInfo(ctx context.Context, uid string) ([]string, error) {
  */
 func (m *Meta) InitBucketUsageCache() error {
 	// the map contains the bucket usage which are not in cache.
-	bucketUsageMap := make(map[string]*Bucket)
+	bucketUsageMap := make(map[string]*types.Bucket)
 	// the map contains the bucket usage which are in cache and will be synced into database.
-	bucketUsageCacheMap := make(map[string]int64)
+	bucketUsageCacheMap := make(map[string]*types.BucketInfo)
 	// the usage in buckets table is accurate now.
 	buckets, err := m.Client.GetBuckets()
 	if err != nil {
-		helper.Logger.Println(2, "failed to get buckets from db. err: ", err)
+		helper.Logger.Error(nil, fmt.Sprintf("failed to get buckets from db. err: ", err))
 		return err
 	}
 
@@ -137,23 +170,61 @@ func (m *Meta) InitBucketUsageCache() error {
 	pattern := fmt.Sprintf("%s*", BUCKET_CACHE_PREFIX)
 	bucketsInCache, err := m.Cache.Keys(redis.BucketTable, pattern)
 	if err != nil {
-		helper.Logger.Println(2, "failed to get bucket usage from cache, err: ", err)
+		helper.Logger.Error(nil, fmt.Sprintf("failed to get bucket usage from cache, err: ", err))
 		return err
 	}
 
 	if len(bucketsInCache) > 0 {
 		// query all usages from cache.
 		for _, bic := range bucketsInCache {
-			usage, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, bic, FIELD_NAME_USAGE)
+			elems := strings.Split(bic, ":")
+			name := bic
+			if len(elems) > 0 {
+				name = elems[1]
+			}
+			exists, err := m.Cache.HExists(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_USAGE)
 			if err != nil {
-				helper.Logger.Println(2, "failed to get usage for bucket: ", bic, " with err: ", err)
+				helper.Logger.Error(nil, fmt.Sprintf("failed to hexists for bucket(%s), field(%s), err: %v",
+					name, types.FIELD_NAME_USAGE, err))
+				continue
+			}
+
+			if !exists {
+				helper.Logger.Info(nil, fmt.Sprintf("bucket(%s), field(%s) is not in cache.", name, types.FIELD_NAME_USAGE))
+				continue
+			}
+			exists, err = m.Cache.HExists(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_FILE_NUM)
+			if err != nil {
+				helper.Logger.Error(nil, fmt.Sprintf("failed to hexists for bucket(%s), field(%s), err: %v",
+					name, types.FIELD_NAME_FILE_NUM, err))
+				continue
+			}
+
+			if !exists {
+				helper.Logger.Info(nil, fmt.Sprintf("bucket(%s), field(%s) is not in cache.",
+					name, types.FIELD_NAME_FILE_NUM))
+				continue
+			}
+
+			usage, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_USAGE)
+			if err != nil {
+				helper.Logger.Error(nil, fmt.Sprintf("failed to get usage for bucket: ", name, " with err: ", err))
+				continue
+			}
+
+			fileNum, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, name, types.FIELD_NAME_FILE_NUM)
+			if err != nil {
+				helper.Logger.Error(nil, fmt.Sprintf("failed to get fileNum for bucket: %s, err: %v", name, err))
 				continue
 			}
 			// add the to be synced usage.
-			bucketUsageCacheMap[bic] = usage
-			if _, ok := bucketUsageMap[bic]; ok {
+			bucketUsageCacheMap[name] = &types.BucketInfo{
+				Usage:   usage,
+				FileNum: fileNum,
+			}
+			if _, ok := bucketUsageMap[name]; ok {
 				// if the key already exists in cache, then delete it from map
-				delete(bucketUsageMap, bic)
+				delete(bucketUsageMap, name)
 			}
 		}
 
@@ -161,15 +232,27 @@ func (m *Meta) InitBucketUsageCache() error {
 
 	// init the bucket usage in cache.
 	if len(bucketUsageMap) > 0 {
+		// query fileNum & usages from db.
+		// below query will take some time.
+		infos, err := m.Client.GetAllBucketInfo()
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get all bucket info from db, err: %v", err))
+			return err
+		}
 		for _, bk := range bucketUsageMap {
+			//set the correct fileNum according to above infos.
+			if bi, ok := infos[bk.Name]; ok {
+				bk.FileNum = bi.FileNum
+				bk.Usage = bi.Usage
+			}
 			fields, err := bk.Serialize()
 			if err != nil {
-				helper.Logger.Println(2, "failed to serialize for bucket: ", bk.Name, " with err: ", err)
+				helper.Logger.Error(nil, fmt.Sprintf("failed to serialize for bucket: ", bk.Name, " with err: ", err))
 				return err
 			}
 			_, err = m.Cache.HMSet(redis.BucketTable, BUCKET_CACHE_PREFIX, bk.Name, fields)
 			if err != nil {
-				helper.Logger.Println(2, "failed to set bucket to cache: ", bk.Name, " with err: ", err)
+				helper.Logger.Error(nil, fmt.Sprintf("failed to set bucket to cache: ", bk.Name, " with err: ", err))
 				return err
 			}
 		}
@@ -177,9 +260,9 @@ func (m *Meta) InitBucketUsageCache() error {
 	}
 	// sync the buckets usage in cache into database.
 	if len(bucketUsageCacheMap) > 0 {
-		err = m.Client.UpdateUsages(bucketUsageCacheMap, nil)
+		err = m.Client.UpdateBucketInfo(bucketUsageCacheMap, nil)
 		if err != nil {
-			helper.Logger.Println(2, "failed to sync usages to database, err: ", err)
+			helper.Logger.Error(nil, fmt.Sprintf("failed to sync usages to database, err: ", err))
 			return err
 		}
 	}
@@ -187,45 +270,58 @@ func (m *Meta) InitBucketUsageCache() error {
 }
 
 func (m *Meta) bucketUsageSync() error {
-	buckets, err := m.Cache.HGetAll(redis.BucketTable, SYNC_EVENT_BUCKET_USAGE_PREFIX, "trigger")
+	buckets, err := m.Cache.HGetAll(redis.BucketTable, types.SYNC_EVENT_BUCKET_USAGE_PREFIX, "trigger")
 	if err != nil {
-		helper.Logger.Printf(2, "failed to get buckets whose usage are changed, err: %v", err)
+		helper.Logger.Error(nil, fmt.Sprintf("failed to get buckets whose usage are changed, err: %v", err))
 		return err
 	}
 	if len(buckets) <= 0 {
 		return nil
 	}
 	var cacheRemove []string
+	bucketInfos := make(map[string]*types.BucketInfo)
 	for k, _ := range buckets {
-		usage, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, k, FIELD_NAME_USAGE)
+		usage, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, k, types.FIELD_NAME_USAGE)
 		if err != nil {
-			helper.Logger.Printf(2, "failed to get usage for bucket: %s, err: %v", k, err)
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get usage for bucket: %s, err: %v", k, err))
 			continue
 		}
-		err = m.Client.UpdateUsage(k, usage, nil)
+		fileNum, err := m.Cache.HGetInt64(redis.BucketTable, BUCKET_CACHE_PREFIX, k, types.FIELD_NAME_FILE_NUM)
 		if err != nil {
-			helper.Logger.Println(2, "failed to update bucket usage ", usage, " to bucket: ", k,
-				" err: ", err)
+			helper.Logger.Error(nil, fmt.Sprintf("failed to get fileNum for bucket: %s, err: %v", k, err))
 			continue
 		}
+		bucketInfos[k] = &types.BucketInfo{
+			Usage:   usage,
+			FileNum: fileNum,
+		}
+
 		cacheRemove = append(cacheRemove, k)
 
-		helper.Logger.Println(20, "succeed to update bucket usage ", usage, " for bucket: ", k)
+		helper.Logger.Info(nil, fmt.Sprintf("add bucket info[%s, %d, %d] for update", k, usage, fileNum))
+	}
+
+	if len(bucketInfos) > 0 {
+		err = m.Client.UpdateBucketInfo(bucketInfos, nil)
+		if err != nil {
+			helper.Logger.Error(nil, fmt.Sprintf("failed to update bucket info, err: %v", err))
+			return err
+		}
 	}
 	// remove the bucket usage sync event.
 	if len(cacheRemove) > 0 {
-		_, err = m.Cache.HDel(redis.BucketTable, SYNC_EVENT_BUCKET_USAGE_PREFIX, "trigger", cacheRemove)
+		_, err = m.Cache.HDel(redis.BucketTable, types.SYNC_EVENT_BUCKET_USAGE_PREFIX, "trigger", cacheRemove)
 		if err != nil {
-			helper.Logger.Printf(2, "failed to unset the bucket usage change event for %v, err: %v", cacheRemove, err)
+			helper.Logger.Error(nil, fmt.Sprintf("failed to unset the bucket usage change event for %v, err: %v", cacheRemove, err))
 			return err
 		}
-		helper.Logger.Printf(20, "succeed to remove bucket usage trigger for %v", cacheRemove)
+		helper.Logger.Info(nil, fmt.Sprintf("succeed to remove bucket usage trigger for %v", cacheRemove))
 	}
 	return nil
 }
 
-func (m *Meta) addBucketUsageSyncEvent(bucketName string) error {
-	_, err := m.Cache.HSet(redis.BucketTable, SYNC_EVENT_BUCKET_USAGE_PREFIX, "trigger", bucketName, 1)
+func (m *Meta) addBucketInfoSyncEvent(bucketName string) error {
+	_, err := m.Cache.HSet(redis.BucketTable, types.SYNC_EVENT_BUCKET_USAGE_PREFIX, "trigger", bucketName, 1)
 	if err != nil {
 		return err
 	}

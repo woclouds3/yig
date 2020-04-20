@@ -335,7 +335,7 @@ func (api ObjectAPIHandlers) DeleteMultipleObjectsHandler(w http.ResponseWriter,
 // ----------
 // This implementation of the PUT operation creates a new bucket for authenticated request
 func (api ObjectAPIHandlers) PutBucketHandler(w http.ResponseWriter, r *http.Request) {
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "PutBucketHandler", "enter")
+	helper.Logger.Info(r.Context(), "PutBucketHandler", "enter")
 	vars := mux.Vars(r)
 	bucketName := strings.ToLower(vars["bucket"])
 	if !isValidBucketName(bucketName) || strings.HasPrefix(bucketName, meta.HIDDEN_BUCKET_PREFIX) {
@@ -350,7 +350,7 @@ func (api ObjectAPIHandlers) PutBucketHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if len(r.Header.Get("Content-Length")) == 0 {
-		helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Content Length is null!")
+		helper.Logger.Error(r.Context(), "Content Length is null!")
 		WriteErrorResponse(w, r, ErrInvalidHeader)
 		return
 	}
@@ -386,7 +386,7 @@ func (api ObjectAPIHandlers) PutBucketHandler(w http.ResponseWriter, r *http.Req
 func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bucket := vars["bucket"]
-	helper.Logger.Println(10, "[", RequestIdFromContext(r.Context()), "]", "enter PutBucketLCHandler")
+	helper.Logger.Info(r.Context(), "enter PutBucketLCHandler")
 	var credential common.Credential
 	var err error
 	if credential, err = signature.IsReqAuthenticated(r); err != nil {
@@ -408,7 +408,7 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	helper.Debugln("[", RequestIdFromContext(r.Context()), "]", "Set LC:", lc)
+	helper.Logger.Info(r.Context(), "Set LC:", lc)
 
 	// Check whether Glacier is supported.
 	// By default, we only support STANDARD.
@@ -425,7 +425,7 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 			}
 
 			// Not supported.
-			helper.Logger.Println(5, "[", RequestIdFromContext(r.Context()), "]", "StorageClass not supported:", rule, helper.CONFIG.Glacier.EnableGlacier)
+			helper.Logger.Error(r.Context(), "StorageClass not supported:", rule, helper.CONFIG.Glacier.EnableGlacier)
 			WriteErrorResponse(w, r, ErrInvalidStorageClass)
 			return
 		}
@@ -433,7 +433,7 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 		if createVaultFlag == true {
 			err = api.ObjectAPI.CreateVault(r.Context(), credential)
 			if err != nil {
-				helper.Logger.Println(5, RequestIdFromContext(r.Context()), "]", "create vault failed", bucket)
+				helper.Logger.Error(r.Context(), "create vault failed", bucket)
 				WriteErrorResponse(w, r, ErrInternalError)
 				return
 			}
@@ -444,12 +444,12 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 				Acl{CannedAcl: ValidCannedAcl[CANNEDACL_PRIVATE]},
 				credential)
 			if err != nil && err != ErrBucketAlreadyOwnedByYou {
-				helper.Logger.Println(5, RequestIdFromContext(r.Context()), "]", "Create hidden bucket failed", err)
+				helper.Logger.Error(r.Context(), "Create hidden bucket failed", err)
 				WriteErrorResponse(w, r, ErrInternalError)
 				return
 			}
 
-			helper.Logger.Println(20, "[", RequestIdFromContext(r.Context()), "]", "hidden bucket created", meta.HIDDEN_BUCKET_PREFIX+credential.UserId)
+			helper.Logger.Info(r.Context(), "hidden bucket created", meta.HIDDEN_BUCKET_PREFIX+credential.UserId)
 		}
 	}
 

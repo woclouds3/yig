@@ -62,7 +62,7 @@ func parseListObjectsQuery(ctx context.Context, query url.Values) (request ListO
 	} else {
 		request.MaxKeys, err = strconv.Atoi(query.Get("max-keys"))
 		if err != nil {
-			helper.Debugln("[", RequestIdFromContext(ctx), "]", "Error parsing max-keys:", err)
+			helper.Logger.Error(ctx, "Error parsing max-keys:", err)
 			return request, ErrInvalidMaxKeys
 		}
 		if request.MaxKeys > MaxObjectList || request.MaxKeys < 1 {

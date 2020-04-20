@@ -35,12 +35,17 @@ func (kf *Kafka) Start() error {
 				}
 				if m.TopicPartition.Error != nil {
 					// error here.
-					helper.Logger.Printf(2, "failed to send message to topic[%s] [%d] at offset [%v] with err: %v", *m.TopicPartition.Topic, m.TopicPartition.Partition, m.TopicPartition.Offset, m.TopicPartition.Error)
+					helper.Logger.Error(nil,
+						fmt.Sprintf(
+							"Failed to send message to topic[%s] [%d] at offset [%v] with err: %v",
+							*m.TopicPartition.Topic, m.TopicPartition.Partition,
+							m.TopicPartition.Offset, m.TopicPartition.Error))
 					break
 				}
-				helper.Logger.Printf(20, "succeed to send message to topic[%s] [%d] at offset [%v]", *m.TopicPartition.Topic, m.TopicPartition.Partition, m.TopicPartition.Offset)
+				helper.Logger.Info(nil, fmt.Sprintf("Succeed to send message to topic[%s] [%d] at offset [%v]",
+					*m.TopicPartition.Topic, m.TopicPartition.Partition, m.TopicPartition.Offset))
 			default:
-				helper.Logger.Printf(20, "skip event: %v", ev)
+				helper.Logger.Info(nil, "Skip event:", ev)
 			}
 		}
 	}()
