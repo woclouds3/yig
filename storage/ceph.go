@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/journeymidnight/radoshttpd/rados"
@@ -35,7 +36,6 @@ type CephStorage struct {
 	Conn       *rados.Conn
 	InstanceId uint64
 	Logger     log.Logger
-	CountMutex *sync.Mutex
 	Counter    uint64
 	BufPool    *sync.Pool
 	BigBufPool *sync.Pool
@@ -75,7 +75,6 @@ func NewCephStorage(configFile string, logger log.Logger) *CephStorage {
 		Name:       name,
 		InstanceId: id,
 		Logger:     logger,
-		CountMutex: new(sync.Mutex),
 		BufPool: &sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(make([]byte, BIG_FILE_THRESHOLD))
@@ -140,10 +139,8 @@ func drain_pending(p *list.List) int {
 }
 
 func (cluster *CephStorage) GetUniqUploadName() string {
-	cluster.CountMutex.Lock()
-	defer cluster.CountMutex.Unlock()
-	cluster.Counter += 1
-	oid := fmt.Sprintf("%d:%d", cluster.InstanceId, cluster.Counter)
+	oid_suffix := atomic.AddUint64(&cluster.Counter, 1)
+	oid := fmt.Sprintf("%d:%d", cluster.InstanceId, oid_suffix)
 	return oid
 }
 
