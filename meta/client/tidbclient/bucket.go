@@ -15,9 +15,9 @@ import (
 )
 
 func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
-	var acl, cors, lc, policy, createTime string
+	var acl, cors, lc, policy, website, createTime string
 	var updateTime sql.NullString
-	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,update_time from buckets where bucketname=?;"
+	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,update_time,website from buckets where bucketname=?;"
 	tmp := &Bucket{}
 	err = t.Client.QueryRow(sqltext, bucketName).Scan(
 		&tmp.Name,
@@ -30,6 +30,7 @@ func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
 		&tmp.Usage,
 		&tmp.Versioning,
 		&updateTime,
+		&website,
 	)
 	if err != nil && err == sql.ErrNoRows {
 		err = ErrNoSuchBucket
@@ -64,11 +65,17 @@ func (t *TidbClient) GetBucket(bucketName string) (bucket *Bucket, err error) {
 		}
 	}
 	bucket = tmp
+
+	err = json.Unmarshal([]byte(website), &bucket.Website)
+	if err != nil {
+		return
+	}
+
 	return
 }
 
 func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
-	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,update_time from buckets;"
+	sqltext := "select bucketname,acl,cors,lc,uid,policy,createtime,usages,versioning,update_time,website from buckets;"
 	rows, err := t.Client.Query(sqltext)
 	if err == sql.ErrNoRows {
 		err = nil
@@ -80,8 +87,9 @@ func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
 
 	for rows.Next() {
 		var tmp Bucket
-		var acl, cors, lc, policy, createTime string
+		var acl, cors, lc, policy, createTime, website string
 		var updateTime sql.NullString
+
 		err = rows.Scan(
 			&tmp.Name,
 			&acl,
@@ -92,7 +100,8 @@ func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
 			&createTime,
 			&tmp.Usage,
 			&tmp.Versioning,
-			&updateTime)
+			&updateTime,
+			&website)
 		if err != nil {
 			return
 		}
@@ -122,6 +131,12 @@ func (t *TidbClient) GetBuckets() (buckets []*Bucket, err error) {
 				return
 			}
 		}
+
+		err = json.Unmarshal([]byte(website), &tmp.Website)
+		if err != nil {
+			return
+		}
+
 		buckets = append(buckets, &tmp)
 	}
 	err = rows.Err()

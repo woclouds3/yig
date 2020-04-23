@@ -37,8 +37,8 @@ func (d DebugIamClient) GetKeysByUid(uid string) (c []common.Credential, err err
 
 func (d DebugIamClient) GetCredential(accessKey string) (c common.Credential, err error) {
 	return common.Credential{
-		UserId:          "hehehehe",
-		DisplayName:     "hehehehe",
+		UserId:          accessKey,
+		DisplayName:     accessKey,
 		AccessKeyID:     accessKey,
 		SecretAccessKey: "hehehehe",
 	}, nil // For test now

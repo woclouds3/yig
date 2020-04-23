@@ -375,6 +375,34 @@ func (yig *YigStorage) DeleteBucketPolicy(ctx context.Context, credential common
 	return nil
 }
 
+func (yig *YigStorage) SetBucketWebsite(bucket *types.Bucket, config datatype.WebsiteConfiguration) (err error) {
+	bucket.Website = config
+	err = yig.MetaStorage.Client.PutBucket(bucket)
+	if err != nil {
+		return err
+	}
+	yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucket.Name)
+	return nil
+}
+
+func (yig *YigStorage) GetBucketWebsite(bucketName string) (config datatype.WebsiteConfiguration, err error) {
+	bucket, err := yig.MetaStorage.GetBucket(nil, bucketName, true)
+	if err != nil {
+		return
+	}
+	return bucket.Website, nil
+}
+
+func (yig *YigStorage) DeleteBucketWebsite(bucket *types.Bucket) error {
+	bucket.Website = datatype.WebsiteConfiguration{}
+	err := yig.MetaStorage.Client.PutBucket(bucket)
+	if err != nil {
+		return err
+	}
+	yig.MetaStorage.Cache.Remove(redis.BucketTable, meta.BUCKET_CACHE_PREFIX, bucket.Name)
+	return nil
+}
+
 func (yig *YigStorage) ListBuckets(ctx context.Context, credential common.Credential) (buckets []*types.Bucket, err error) {
 	bucketNames, err := yig.MetaStorage.GetUserBuckets(ctx, credential.UserId, true)
 	if err != nil {

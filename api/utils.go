@@ -78,9 +78,9 @@ func RequestIdFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	
+
 	if result, ok := ctx.Value(RequestContextKey).(RequestContext); ok {
-		return result.RequestId
+		return result.RequestID
 	}
 	return ""
 }
@@ -138,7 +138,7 @@ func xmlFormat(data interface{}) ([]byte, error) {
 	return output, nil
 }
 
-func setXmlHeader(w http.ResponseWriter, body []byte) {
+func setXmlHeader(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/xml")
 }
 

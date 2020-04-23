@@ -66,7 +66,7 @@ func (h corsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Vary", "Origin")
 	origin := r.Header.Get("Origin")
 
-	ctx := r.Context().Value(RequestContextKey).(RequestContext)
+	ctx := getRequestContext(r)
 	bucket := ctx.BucketInfo
 
 	if bucket != nil {
@@ -114,7 +114,7 @@ type resourceHandler struct {
 func (h resourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Skip the first element which is usually '/' and split the rest.
 	tstart := time.Now()
-	bucketName, objectName := GetBucketAndObjectInfoFromRequest(r)
+	bucketName, objectName, _ := GetBucketAndObjectInfoFromRequest(r)
 	helper.Logger.Info(r.Context(), "ServeHTTP", bucketName, objectName, "Hostname:", strings.Split(r.Host, ":"))
 
 	// Check host name with configuration.
@@ -200,7 +200,7 @@ func (h GenerateContextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	var err error
 	tstart := time.Now()
 	requestId := string(helper.GenerateRandomId())
-	bucketName, objectName := GetBucketAndObjectInfoFromRequest(r)
+	bucketName, objectName, isBucketDomain := GetBucketAndObjectInfoFromRequest(r)
 	helper.Logger.Info(nil, "GenerateContextHandler. RequestId:", requestId, "BucketName:", bucketName, "ObjectName:", objectName)
 
 	ctx := context.WithValue(r.Context(), "RequestId", requestId)
@@ -220,7 +220,24 @@ func (h GenerateContextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	ctx = context.WithValue(ctx, RequestContextKey, RequestContext{requestId, bucketInfo, objectInfo})
+	authType := signature.GetRequestAuthType(r)
+	if authType == signature.AuthTypeUnknown {
+		WriteErrorResponse(w, r, ErrSignatureVersionNotSupported)
+		return
+	}
+
+	ctx = context.WithValue(
+		ctx,
+		RequestContextKey,
+		RequestContext{
+			RequestID:      requestId,
+			BucketName:     bucketName,
+			ObjectName:     objectName,
+			BucketInfo:     bucketInfo,
+			ObjectInfo:     objectInfo,
+			AuthType:       authType,
+			IsBucketDomain: isBucketDomain,
+		})
 	h.handler.ServeHTTP(w, r.WithContext(ctx))
 	tend := time.Now()
 	dur := tend.Sub(tstart).Nanoseconds() / 1000000
@@ -291,7 +308,6 @@ var notimplementedBucketResourceNames = map[string]bool{
 	"replication":    true,
 	"tagging":        true,
 	"requestPayment": true,
-	"website":        true,
 }
 
 // List of not implemented object queries
@@ -300,15 +316,13 @@ var notimplementedObjectResourceNames = map[string]bool{
 	"tagging": true,
 }
 
-func GetBucketAndObjectInfoFromRequest(r *http.Request) (bucketName string, objectName string) {
+func GetBucketAndObjectInfoFromRequest(r *http.Request) (bucketName string, objectName string, isBucketDomain bool) {
 	splits := strings.SplitN(r.URL.Path[1:], "/", 2)
 	v := strings.Split(r.Host, ":")
 	hostWithOutPort := v[0]
-	ok, bucketName := helper.HasBucketInDomain(hostWithOutPort, ".", helper.CONFIG.S3Domain)
-	if ok {
-		if len(splits) == 1 {
-			objectName = splits[0]
-		}
+	isBucketDomain, bucketName = helper.HasBucketInDomain(hostWithOutPort, ".", helper.CONFIG.S3Domain)
+	if isBucketDomain {
+		objectName = r.URL.Path[1:]
 	} else {
 		if len(splits) == 1 {
 			bucketName = splits[0]
@@ -318,7 +332,18 @@ func GetBucketAndObjectInfoFromRequest(r *http.Request) (bucketName string, obje
 			objectName = splits[1]
 		}
 	}
-	return
+	return bucketName, objectName, isBucketDomain
+}
+
+func getRequestContext(r *http.Request) RequestContext {
+	ctx, ok := r.Context().Value(RequestContextKey).(RequestContext)
+	if ok {
+		return ctx
+	}
+	helper.Logger.Warn(r.Context(), "getRequestContext() faile, key:", RequestContextKey, r.Context())
+	return RequestContext{
+		RequestID: r.Context().Value(RequestIdKey).(string),
+	}
 }
 
 func isValidHostName(r *http.Request) bool {
