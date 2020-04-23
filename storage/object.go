@@ -21,6 +21,7 @@ import (
 	"github.com/journeymidnight/yig/iam"
 	"github.com/journeymidnight/yig/iam/common"
 	obj "github.com/journeymidnight/yig/meta"
+	"github.com/journeymidnight/yig/meta/types"
 	meta "github.com/journeymidnight/yig/meta/types"
 	"github.com/journeymidnight/yig/redis"
 	"github.com/journeymidnight/yig/signature"
@@ -676,6 +677,7 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 	var initializationVector []byte
 	var objSize int64
 	var oldVersionId string
+	isNewObj := false
 	if isObjectExist(objInfo) {
 		cephCluster, err = yig.GetClusterByFsName(objInfo.Location)
 		if err != nil {
@@ -689,6 +691,7 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 		storageClass = objInfo.StorageClass
 		oldVersionId = objInfo.VersionId
 		helper.Logger.Info(ctx, "request append oid:", oid, "iv:", initializationVector, "size:", objSize)
+		isNewObj = false
 	} else {
 		// New appendable object
 		cephCluster, poolName = yig.PickOneClusterAndPool(ctx, bucketName, objectName, size, true)
@@ -705,6 +708,7 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 			}
 		}
 		helper.Logger.Info(ctx, "request first append oid:", oid, "iv:", initializationVector, "size:", objSize)
+		isNewObj = true
 	}
 
 	dataReader := io.TeeReader(limitedDataReader, md5Writer)
@@ -773,10 +777,17 @@ func (yig *YigStorage) AppendObject(ctx context.Context, bucketName string, obje
 	}
 
 	// update bucket usage.
-	err = yig.MetaStorage.UpdateUsage(ctx, bucketName, bytesWritten)
+	err = yig.MetaStorage.UpdateBucketInfo(ctx, bucketName, types.FIELD_NAME_USAGE, bytesWritten)
 	if err != nil {
 		helper.Logger.Error(ctx, fmt.Sprintf("failed to update bucket usage for bucket: %s with append object: %v, err: %v", bucketName, object, err))
 		return result, err
+	}
+	if isNewObj {
+		err = yig.MetaStorage.UpdateBucketInfo(ctx, bucketName, types.FIELD_NAME_FILE_NUM, 1)
+		if err != nil {
+			helper.Logger.Error(ctx, fmt.Sprintf("failed to update bucket fileNum for bucket: %s with append object: %v, err: %v", bucketName, object, err))
+			return result, err
+		}
 	}
 	yig.MetaStorage.Cache.Remove(redis.ObjectTable, obj.OBJECT_CACHE_PREFIX, bucketName+":"+objectName+":")
 	yig.DataCache.Remove(bucketName + ":" + objectName + ":" + object.GetVersionId())

@@ -38,6 +38,7 @@ type MetaCache interface {
 	HGetAll(table redis.RedisDatabase, prefix, key string) (map[string]string, error)
 	HMSet(table redis.RedisDatabase, prefix, key string, fields map[string]interface{}) (string, error)
 	HIncrBy(table redis.RedisDatabase, prefix, key, field string, value int64) (int64, error)
+	HExists(table redis.RedisDatabase, prefix, key, field string) (bool, error)
 }
 
 type disabledMetaCache struct{}
@@ -101,6 +102,10 @@ func (m *disabledMetaCache) HMSet(table redis.RedisDatabase, prefix, key string,
 
 func (m *disabledMetaCache) HIncrBy(table redis.RedisDatabase, prefix, key, field string, value int64) (int64, error) {
 	return 0, errors.New(MSG_NOT_IMPL)
+}
+
+func (m *disabledMetaCache) HExists(table redis.RedisDatabase, prefix, key, field string) (bool, error) {
+	return false, errors.New(MSG_NOT_IMPL)
 }
 
 func (m *disabledMetaCache) Close() {
@@ -193,6 +198,10 @@ func (m *enabledSimpleMetaCache) HMSet(table redis.RedisDatabase, prefix, key st
 
 func (m *enabledSimpleMetaCache) HIncrBy(table redis.RedisDatabase, prefix, key, field string, value int64) (int64, error) {
 	return redis.HIncrBy(table, prefix, key, field, value)
+}
+
+func (m *enabledSimpleMetaCache) HExists(table redis.RedisDatabase, prefix, key, field string) (bool, error) {
+	return redis.HExists(table, prefix, key, field)
 }
 
 func (m *enabledSimpleMetaCache) Close() {

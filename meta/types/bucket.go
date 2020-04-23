@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	FIELD_NAME_BODY   = "body"
-	FIELD_NAME_USAGE  = "usage"
-	FIELD_NAME_POLICY = "policy"
+	FIELD_NAME_BODY     = "body"
+	FIELD_NAME_USAGE    = "usage"
+	FIELD_NAME_POLICY   = "policy"
+	FIELD_NAME_FILE_NUM = "fileNum"
 )
 
 const (
@@ -40,6 +41,7 @@ type Bucket struct {
 	Website    datatype.WebsiteConfiguration
 	Versioning string // actually enum: Disabled/Enabled/Suspended
 	Usage      int64
+	FileNum    int64
 	UpdateTime time.Time
 }
 
@@ -62,6 +64,7 @@ func (b *Bucket) Serialize() (map[string]interface{}, error) {
 	fields[FIELD_NAME_BODY] = string(bytes)
 	fields[FIELD_NAME_USAGE] = b.Usage
 	fields[FIELD_NAME_POLICY] = string(pjson)
+	fields[FIELD_NAME_FILE_NUM] = b.FileNum
 	return fields, nil
 }
 
@@ -88,6 +91,13 @@ func (b *Bucket) Deserialize(fields map[string]string) (interface{}, error) {
 		}
 	}
 
+	if num, ok := fields[FIELD_NAME_FILE_NUM]; ok {
+		b.FileNum, err = strconv.ParseInt(num, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return b, nil
 }
 
@@ -102,6 +112,7 @@ func (b *Bucket) String() (s string) {
 	s += "Website: " + fmt.Sprintf("%+v", b.Website) + "\n"
 	s += "Version: " + b.Versioning + "\n"
 	s += "Usage: " + humanize.Bytes(uint64(b.Usage)) + "\n"
+	s += "FileNum: " + humanize.Bytes(uint64(b.FileNum)) + "\n"
 	s += "UpdateTime: " + b.UpdateTime.Format(CREATE_TIME_LAYOUT) + "\n"
 	return
 }
@@ -123,6 +134,12 @@ func (b *Bucket) GetValues() (values map[string]map[string][]byte, err error) {
 		return
 	}
 
+	var fileNum bytes.Buffer
+	err = binary.Write(&fileNum, binary.BigEndian, b.FileNum)
+	if err != nil {
+		return
+	}
+
 	values = map[string]map[string][]byte{
 		BUCKET_COLUMN_FAMILY: map[string][]byte{
 			"UID":        []byte(b.OwnerId),
@@ -132,6 +149,7 @@ func (b *Bucket) GetValues() (values map[string]map[string][]byte, err error) {
 			"createTime": []byte(b.CreateTime.Format(CREATE_TIME_LAYOUT)),
 			"versioning": []byte(b.Versioning),
 			"usage":      usage.Bytes(),
+			"fileNum":    fileNum.Bytes(),
 			"UpdateTime": []byte(b.UpdateTime.Format(CREATE_TIME_LAYOUT)),
 		},
 		// TODO fancy ACL
@@ -159,8 +177,14 @@ func (b Bucket) GetCreateSql() (string, []interface{}) {
 	website, _ := json.Marshal(b.Website)
 	createTime := b.CreateTime.Format(TIME_LAYOUT_TIDB)
 
-	sql := "insert into buckets(bucketname,acl,cors,lc,uid,policy,website,createtime,usages,versioning) " +
-		"values(?,?,?,?,?,?,?,?,?,?);"
-	args := []interface{}{b.Name, acl, cors, lc, b.OwnerId, bucket_policy, website, createTime, b.Usage, b.Versioning}
+	sql := "insert into buckets(bucketname,acl,cors,lc,uid,policy,website,createtime,usages,fileNum,versioning) " +
+		"values(?,?,?,?,?,?,?,?,?,?,?);"
+	args := []interface{}{b.Name, acl, cors, lc, b.OwnerId, bucket_policy, website, createTime, b.Usage, b.FileNum, b.Versioning}
 	return sql, args
+}
+
+type BucketInfo struct {
+	BucketName string
+	Usage      int64
+	FileNum    int64
 }

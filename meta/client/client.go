@@ -29,7 +29,8 @@ type Client interface {
 	DeleteBucket(bucket *Bucket) error
 	ListObjects(ctx context.Context, bucketName, marker, verIdMarker, prefix, delimiter string, versioned bool, maxKeys int, withDeleteMarker bool) (retObjects []*Object, prefixes []string, truncated bool, nextMarker, nextVerIdMarker string, err error)
 	UpdateUsage(bucketName string, size int64, tx interface{}) error
-	UpdateUsages(usages map[string]int64, tx interface{}) error
+	UpdateBucketInfo(usages map[string]*BucketInfo, tx interface{}) error
+	GetAllBucketInfo() (map[string]*BucketInfo, error)
 
 	//multipart
 	GetMultipart(bucketName, objectName, uploadId string) (multipart Multipart, err error)
