@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	MAX_CORS_SIZE = 64 << 10 // 64 KB
+	MAX_CORS_SIZE  = 64 << 10 // 64 KB
+	MAX_CORS_RULES = 100
 )
 
 type CorsRule struct {
@@ -113,8 +114,9 @@ func CorsFromXml(ctx context.Context, corsBuffer []byte) (cors Cors, err error) 
 		helper.ErrorIf(err, "Unable to unmarshal CORS XML")
 		return cors, ErrInvalidCorsDocument
 	}
-	if len(cors.CorsRules) == 0 {
-		return cors, ErrInvalidCorsDocument
+	if len(cors.CorsRules) == 0 || len(cors.CorsRules) > MAX_CORS_RULES {
+		helper.ErrorIf(nil, "Number of rules is invalid, rules =  ", len(cors.CorsRules))
+		return cors, ErrInvalidNumberOfRules
 	}
 	for _, rule := range cors.CorsRules {
 		if len(rule.AllowedMethods) == 0 || len(rule.AllowedOrigins) == 0 {

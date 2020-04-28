@@ -169,6 +169,8 @@ const (
 	ErrIndexDocumentNotAllowed
 	ErrInvalidIndexDocumentSuffix
 	ErrInvalidErrorDocumentKey
+	ErrInvalidLifcycleDocument
+	ErrInvalidNumberOfRules
 )
 
 // error code to APIError structure, these fields carry respective
@@ -768,6 +770,16 @@ var ErrorCodeResponse = map[ApiErrorCode]ApiErrorStruct{
 	ErrInvalidErrorDocumentKey: {
 		AwsErrorCode:   "InvalidErrorDocumentKey",
 		Description:    "The key is required when ErrorDocument is specified.",
+		HttpStatusCode: http.StatusBadRequest,
+	},
+	ErrInvalidLifcycleDocument: {
+		AwsErrorCode:   "InvalidLifecycleDocument",
+		Description:    "The LC XML you provided is invalid",
+		HttpStatusCode: http.StatusBadRequest,
+	},
+	ErrInvalidNumberOfRules: {
+		AwsErrorCode:   "InvalidNumberOfRules",
+		Description:    "The number of rules you provided exceeds is invalid",
 		HttpStatusCode: http.StatusBadRequest,
 	},
 }

@@ -399,15 +399,22 @@ func (api ObjectAPIHandlers) PutBucketLifeCycleHandler(w http.ResponseWriter, r 
 		WriteErrorResponse(w, r, err)
 		return
 	}
-
-	var lc Lc
-	lcBuffer, err := ioutil.ReadAll(io.LimitReader(r.Body, 4096))
+	if r.ContentLength <= 0 {
+		WriteErrorResponse(w, r, ErrMissingContentLength)
+		return
+	}
+	lcBuffer, err := ioutil.ReadAll(io.LimitReader(r.Body, r.ContentLength))
 	if err != nil {
 		helper.ErrorIf(err, "Unable to read lifecycle body")
 		WriteErrorResponse(w, r, ErrInvalidLc)
 		return
 	}
-	err = xml.Unmarshal(lcBuffer, &lc)
+
+	lc, err := LifcycleFromXml(r.Context(), lcBuffer)
+	if err != nil {
+		WriteErrorResponse(w, r, err)
+		return
+	}
 	if err != nil {
 		helper.ErrorIf(err, "Unable to parse lifecycle xml body")
 		WriteErrorResponse(w, r, ErrInternalError)
